@@ -1,0 +1,10 @@
+id: transactions_ledger
+name: Finance transaction ledger
+description: >
+  Invoices, payments, refunds and chargebacks with payment status and due
+  dates. Use for accounts receivable and revenue questions: overdue invoices,
+  outstanding balances, arrears by neighbourhood, payment reconciliation,
+  refund exposure and cash collected.
+retrieval: sql
+tables:
+  - transactions

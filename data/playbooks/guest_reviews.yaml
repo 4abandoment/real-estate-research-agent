@@ -1,0 +1,9 @@
+id: guest_reviews
+name: Guest review text
+description: >
+  Free-text guest reviews for each property. Use for qualitative questions
+  about guest sentiment, complaints, maintenance issues, cleanliness, host
+  behaviour and recurring themes that are not captured by numeric fields.
+retrieval: semantic
+tables:
+  - reviews

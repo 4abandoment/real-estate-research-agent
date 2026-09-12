@@ -1,0 +1,10 @@
+id: land_registry
+name: HM Land Registry price paid data
+description: >
+  Real property sale transactions for London postcodes with price, date,
+  property type and tenure. Use for comparable sales, valuation benchmarks,
+  market price context and cross-checking achieved prices against the short-let
+  portfolio.
+retrieval: sql
+tables:
+  - land_registry
