@@ -18,6 +18,7 @@ from pathlib import Path
 
 from research_agent.config import load_settings
 from research_agent.db import apply_schema, connect
+from research_agent.entity_resolution import build_neighbourhood_links
 from research_agent.safety.pii import redact
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,10 +26,10 @@ RAW = ROOT / "data" / "raw"
 SEED = ROOT / "data" / "seed"
 
 AIRBNB = "https://data.insideairbnb.com/united-kingdom/england/london/2026-06-19/data"
-PPD = "https://price-paid-data.publicdata.landregistry.gov.uk/pp-monthly-update-new-version.csv"
+PPD_YEAR = 2025
+PPD_URLS = [f"https://price-paid-data.publicdata.landregistry.gov.uk/pp-{PPD_YEAR}.csv"]
 
 LONDON_POSTCODE = re.compile(r"^(E|EC|N|NW|SE|SW|W|WC)\d")
-DEFAULT_LISTING_SAMPLE = 1000
 
 LISTING_COLS = (
     "id,name,host_id,host_name,neighbourhood,latitude,longitude,room_type,"
@@ -92,13 +93,13 @@ def as_date(value: str | None) -> str | None:
     return value.strip()[:10] or None
 
 
-def load_listings(conn, path: Path, limit: int) -> list[int]:
+def load_listings(conn, path: Path, limit: int | None = None) -> list[int]:
     ids: list[int] = []
     with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         with conn.cursor().copy(f"COPY listings ({LISTING_COLS}) FROM STDIN") as copy:
             for index, row in enumerate(reader):
-                if index >= limit:
+                if limit is not None and index >= limit:
                     break
                 try:
                     listing_id = int(row["id"])
@@ -262,7 +263,7 @@ def write_seed(conn, rows: int = 20) -> None:
 
 
 def main() -> None:
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_LISTING_SAMPLE
+    limit = int(sys.argv[1]) if len(sys.argv) > 1 else None
     database_url = load_settings().database_url
     if not database_url:
         raise SystemExit("DATABASE_URL is required.")
@@ -273,7 +274,7 @@ def main() -> None:
     listings_path = download(f"{AIRBNB}/listings.csv.gz", RAW / "listings.csv.gz")
     calendar_path = download(f"{AIRBNB}/calendar.csv.gz", RAW / "calendar.csv.gz")
     reviews_path = download(f"{AIRBNB}/reviews.csv.gz", RAW / "reviews.csv.gz")
-    ppd_path = download(PPD, RAW / "ppd-monthly.csv")
+    ppd_paths = [download(url, RAW / f"pp-{PPD_YEAR}.csv") for url in PPD_URLS]
 
     # ponytail: truncate-and-reload is idempotent and simple; add incremental
     # upserts only if ingestion volume or freshness demands it.
@@ -283,7 +284,9 @@ def main() -> None:
     print(f"listings: {len(listing_ids)}")
     print(f"calendar rows: {load_calendar(conn, calendar_path, listing_ids)}")
     print(f"review rows: {load_reviews(conn, reviews_path, listing_ids)}")
-    print(f"land registry rows: {load_land_registry(conn, ppd_path)}")
+    print(f"land registry rows: {sum(load_land_registry(conn, path) for path in ppd_paths)}")
+
+    print(f"neighbourhood links: {build_neighbourhood_links(conn)}")
 
     write_seed(conn)
     print(f"seed sample written to {SEED}")
