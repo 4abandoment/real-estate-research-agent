@@ -1,6 +1,24 @@
+import psycopg
 import pytest
 
-from research_agent.agent.sql import SqlValidationError, extract_sql, validate_sql
+from research_agent.agent.sql import SqlValidationError, extract_sql, run_sql, validate_sql
+
+
+def test_run_sql_times_out_quickly() -> None:
+    pytest.importorskip("research_agent.db")
+    from research_agent.config import load_settings
+    from research_agent.db import connect
+
+    database_url = load_settings().database_url
+    if not database_url:
+        pytest.skip("DATABASE_URL not set")
+    try:
+        conn = connect(database_url)
+    except psycopg.OperationalError:
+        pytest.skip("Postgres not reachable")
+
+    with pytest.raises(psycopg.errors.QueryCanceled):
+        run_sql(conn, "SELECT pg_sleep(10)", timeout_s=1)
 
 
 def test_extract_sql_from_fenced_block() -> None:

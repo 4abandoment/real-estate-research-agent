@@ -27,6 +27,9 @@ Rules:
 - Never modify data: no INSERT/UPDATE/DELETE/DDL.
 - Use explicit column lists and clear aliases. Aggregate when the question asks for totals.
 - `calendar.available = false` means a night is booked.
+- Never run LIKE/ILIKE filters over `reviews.comments`: free-text review questions
+  are answered by semantic search, not SQL. Use reviews only for counts or dates
+  joined by listing_id.
 - Keep result sets small; add LIMIT when returning raw rows.
 """
 
