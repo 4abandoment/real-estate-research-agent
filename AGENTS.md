@@ -50,6 +50,18 @@ ruff format --check .
 python -m research_agent.app
 ```
 
+## Data pipeline
+
+```bash
+python -m research_agent.ingest          # Airbnb + Land Registry -> warehouse
+python -m research_agent.transactions    # modelled finance ledger
+python -m research_agent.policy_kb       # gov.uk policy knowledge base
+python -m research_agent.playbooks       # source registry + embeddings
+python scripts/load_review_embeddings.py # load Colab GPU review vectors
+```
+
+Raw data lives in gitignored `data/raw/`; only `data/seed/` (PII-redacted) is committed.
+
 ## Do not touch
 
 - `data/raw/` — downloaded real data, never committed or edited.
