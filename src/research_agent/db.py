@@ -79,6 +79,21 @@ CREATE TABLE IF NOT EXISTS land_registry (
 );
 
 CREATE INDEX IF NOT EXISTS land_registry_postcode_idx ON land_registry (postcode);
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id BIGSERIAL PRIMARY KEY,
+    listing_id BIGINT NOT NULL,
+    period DATE NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('invoice', 'payment', 'refund', 'chargeback')),
+    amount_gbp NUMERIC(12, 2) NOT NULL,
+    status TEXT NOT NULL,
+    due_date DATE,
+    created_at DATE NOT NULL,
+    reference TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS transactions_listing_idx ON transactions (listing_id);
+CREATE INDEX IF NOT EXISTS transactions_status_idx ON transactions (status);
 """
 
 
