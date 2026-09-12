@@ -137,6 +137,12 @@ CREATE TABLE IF NOT EXISTS review_embeddings (
 CREATE INDEX IF NOT EXISTS review_embeddings_listing_idx
     ON review_embeddings (listing_id);
 
+CREATE TABLE IF NOT EXISTS review_embedding_staging (
+    review_id BIGINT,
+    listing_id BIGINT,
+    embedding vector(384)
+);
+
 CREATE OR REPLACE VIEW neighbourhood_market AS
 SELECT n.listing_neighbourhood AS neighbourhood,
        (SELECT count(*) FROM listings l
