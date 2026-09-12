@@ -35,3 +35,6 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local scratch (interactive architecture visuals, experiments)
+scratch/
