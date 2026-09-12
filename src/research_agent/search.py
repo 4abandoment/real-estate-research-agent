@@ -13,8 +13,9 @@ def _query_vector(embedder: Embedder, query: str) -> str:
 
 def search_reviews(conn, embedder: Embedder, query: str, top_k: int = 5) -> list[dict]:
     rows = conn.execute(
-        "SELECT listing_id, content, embedding <=> %s::vector AS distance"
-        " FROM review_embeddings ORDER BY distance LIMIT %s",
+        "SELECT r.listing_id, r.comments, e.embedding <=> %s::halfvec AS distance"
+        " FROM review_embeddings e JOIN reviews r ON r.id = e.review_id"
+        " ORDER BY distance LIMIT %s",
         (_query_vector(embedder, query), top_k),
     ).fetchall()
     return [{"listing_id": row[0], "content": row[1], "distance": float(row[2])} for row in rows]
@@ -80,10 +81,10 @@ def embed_reviews(
             batch = rows[start : start + batch_size]
             vectors = embedder.embed([row[2] for row in batch], batch_size=batch_size)
             with conn.cursor().copy(
-                "COPY review_embeddings (review_id, listing_id, content, embedding) FROM STDIN"
+                "COPY review_embeddings (review_id, listing_id, embedding) FROM STDIN"
             ) as copy:
-                for (review_id, listing_id, content), vector in zip(batch, vectors, strict=True):
-                    copy.write_row((review_id, listing_id, content, Embedder.to_pgvector(vector)))
+                for (review_id, listing_id, _), vector in zip(batch, vectors, strict=True):
+                    copy.write_row((review_id, listing_id, Embedder.to_pgvector(vector)))
 
         total += len(rows)
         last_id = rows[-1][0]

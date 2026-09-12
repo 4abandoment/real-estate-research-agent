@@ -52,10 +52,17 @@ def generate_sql(llm: LLMClient, question: str, history: str = "") -> str:
     return extract_sql(response.text)
 
 
-def run_sql(conn, sql: str, *, max_rows: int = MAX_ROWS) -> tuple[list[str], list[tuple]]:
-    cursor = conn.execute(sql)
-    columns = [description.name for description in cursor.description]
-    return columns, cursor.fetchmany(max_rows)
+def run_sql(
+    conn, sql: str, *, max_rows: int = MAX_ROWS, timeout_s: int = 30
+) -> tuple[list[str], list[tuple]]:
+    # ponytail: statement cap so a runaway scan fails fast instead of hanging the demo.
+    conn.execute(f"SET statement_timeout = '{timeout_s}s'")
+    try:
+        cursor = conn.execute(sql)
+        columns = [description.name for description in cursor.description]
+        return columns, cursor.fetchmany(max_rows)
+    finally:
+        conn.execute("SET statement_timeout = 0")
 
 
 def format_rows(columns: list[str], rows: list[tuple]) -> str:
