@@ -94,6 +94,15 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 CREATE INDEX IF NOT EXISTS transactions_listing_idx ON transactions (listing_id);
 CREATE INDEX IF NOT EXISTS transactions_status_idx ON transactions (status);
+
+CREATE TABLE IF NOT EXISTS playbooks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    retrieval TEXT NOT NULL,
+    tables TEXT,
+    embedding vector(384)
+);
 """
 
 
