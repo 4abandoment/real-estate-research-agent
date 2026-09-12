@@ -84,13 +84,19 @@ CREATE TABLE IF NOT EXISTS transactions (
     id BIGSERIAL PRIMARY KEY,
     listing_id BIGINT NOT NULL,
     period DATE NOT NULL,
-    type TEXT NOT NULL CHECK (type IN ('invoice', 'payment', 'refund', 'chargeback')),
+    type TEXT NOT NULL CHECK (
+        type IN ('invoice', 'fee', 'tax', 'payment', 'refund', 'chargeback')
+    ),
     amount_gbp NUMERIC(12, 2) NOT NULL,
     status TEXT NOT NULL,
     due_date DATE,
     created_at DATE NOT NULL,
     reference TEXT NOT NULL
 );
+
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
+ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
+    CHECK (type IN ('invoice', 'fee', 'tax', 'payment', 'refund', 'chargeback'));
 
 CREATE INDEX IF NOT EXISTS transactions_listing_idx ON transactions (listing_id);
 CREATE INDEX IF NOT EXISTS transactions_status_idx ON transactions (status);
