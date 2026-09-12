@@ -130,18 +130,11 @@ CREATE TABLE IF NOT EXISTS policy_documents (
 CREATE TABLE IF NOT EXISTS review_embeddings (
     review_id BIGINT PRIMARY KEY,
     listing_id BIGINT NOT NULL,
-    content TEXT NOT NULL,
-    embedding vector(384)
+    embedding halfvec(384)
 );
 
 CREATE INDEX IF NOT EXISTS review_embeddings_listing_idx
     ON review_embeddings (listing_id);
-
-CREATE TABLE IF NOT EXISTS review_embedding_staging (
-    review_id BIGINT,
-    listing_id BIGINT,
-    embedding vector(384)
-);
 
 CREATE TABLE IF NOT EXISTS query_log (
     id BIGSERIAL PRIMARY KEY,
@@ -188,7 +181,11 @@ class Message:
 
 
 def connect(database_url: str) -> psycopg.Connection:
-    return psycopg.connect(database_url, autocommit=True)
+    conn = psycopg.connect(database_url, autocommit=True)
+    # ponytail: probes=10 gives ~100ms lookups over 2M halfvec vectors
+    # (vs seconds for exact scan); raise probes if recall matters more than speed.
+    conn.execute("SET ivfflat.probes = 10")
+    return conn
 
 
 def apply_schema(conn: psycopg.Connection) -> None:
