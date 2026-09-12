@@ -30,3 +30,30 @@ never committed. A small, PII-redacted sample is committed for tests.
 A statistically modelled transaction ledger (regression + noise) is generated
 from the real occupancy and pricing data to provide realistic finance
 operations (invoices, payments, refunds, arrears).
+
+## Pipeline
+
+```bash
+# 1. Warehouse: full London listings + 12 months of Price Paid, plus entity resolution
+python -m research_agent.ingest
+
+# 2. Modelled finance ledger (fees, VAT, payments, refunds, chargebacks)
+python -m research_agent.transactions
+
+# 3. Policy knowledge base from gov.uk guidance (OGL v3.0)
+python -m research_agent.policy_kb
+
+# 4. Seed the source registry (playbooks) + embeddings
+python -m research_agent.playbooks
+
+# 5. Review embeddings: bulk on a Colab GPU (same bge-small model as queries)
+#    Run scripts/colab_embed_reviews.py in Colab, download shards, then:
+python scripts/load_review_embeddings.py
+python scripts/check_embedding_compatibility.py   # GPU vs local vectors agree
+```
+
+Review vectors are produced on a GPU with `BAAI/bge-small-en-v1.5` and queried
+locally with `fastembed` using the **same model**, so no vector schema change or
+runtime API key is required. Query-time retrieval stays local; only the bulk
+embedding job runs in Colab.
+

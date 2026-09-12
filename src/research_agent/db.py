@@ -84,7 +84,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     id BIGSERIAL PRIMARY KEY,
     listing_id BIGINT NOT NULL,
     period DATE NOT NULL,
-    type TEXT NOT NULL CHECK (type IN ('invoice', 'payment', 'refund', 'chargeback')),
+    type TEXT NOT NULL CHECK (
+        type IN ('invoice', 'fee', 'tax', 'payment', 'refund', 'chargeback')
+    ),
     amount_gbp NUMERIC(12, 2) NOT NULL,
     status TEXT NOT NULL,
     due_date DATE,
@@ -92,8 +94,66 @@ CREATE TABLE IF NOT EXISTS transactions (
     reference TEXT NOT NULL
 );
 
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
+ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
+    CHECK (type IN ('invoice', 'fee', 'tax', 'payment', 'refund', 'chargeback'));
+
 CREATE INDEX IF NOT EXISTS transactions_listing_idx ON transactions (listing_id);
 CREATE INDEX IF NOT EXISTS transactions_status_idx ON transactions (status);
+
+CREATE TABLE IF NOT EXISTS playbooks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    retrieval TEXT NOT NULL,
+    tables TEXT,
+    embedding vector(384)
+);
+
+CREATE TABLE IF NOT EXISTS neighbourhood_links (
+    ppd_district TEXT NOT NULL,
+    listing_neighbourhood TEXT NOT NULL,
+    score DOUBLE PRECISION NOT NULL,
+    method TEXT NOT NULL,
+    PRIMARY KEY (ppd_district, listing_neighbourhood)
+);
+
+CREATE TABLE IF NOT EXISTS policy_documents (
+    id BIGSERIAL PRIMARY KEY,
+    source_url TEXT NOT NULL,
+    title TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    embedding vector(384)
+);
+
+CREATE TABLE IF NOT EXISTS review_embeddings (
+    review_id BIGINT PRIMARY KEY,
+    listing_id BIGINT NOT NULL,
+    content TEXT NOT NULL,
+    embedding vector(384)
+);
+
+CREATE INDEX IF NOT EXISTS review_embeddings_listing_idx
+    ON review_embeddings (listing_id);
+
+CREATE TABLE IF NOT EXISTS review_embedding_staging (
+    review_id BIGINT,
+    listing_id BIGINT,
+    embedding vector(384)
+);
+
+CREATE OR REPLACE VIEW neighbourhood_market AS
+SELECT n.listing_neighbourhood AS neighbourhood,
+       (SELECT count(*) FROM listings l
+         WHERE l.neighbourhood = n.listing_neighbourhood) AS listings,
+       (SELECT round(avg(l.price_gbp), 2) FROM listings l
+         WHERE l.neighbourhood = n.listing_neighbourhood) AS avg_listing_price,
+       (SELECT count(*) FROM land_registry r
+         WHERE r.district = n.ppd_district) AS sales,
+       (SELECT round(avg(r.price), 0) FROM land_registry r
+         WHERE r.district = n.ppd_district) AS avg_sale_price
+FROM neighbourhood_links n;
 """
 
 

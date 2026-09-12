@@ -1,0 +1,10 @@
+id: policy_kb
+name: Rental and tenancy policy knowledge base
+description: >
+  Official UK guidance on renting out property, tenancy deposit protection,
+  evictions and renting a room. Use for questions about legal obligations,
+  tenancy rules, deposits, notice periods and compliance, where an answer must
+  cite the source guidance.
+retrieval: semantic
+tables:
+  - policy_documents

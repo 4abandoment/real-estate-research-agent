@@ -15,6 +15,8 @@ dependencies = [
     "anthropic>=0.40",
     "psycopg[binary]>=3.2",
     "numpy>=1.26",
+    "PyYAML>=6.0",
+    "fastembed>=0.3",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,7 @@ where = ["src"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

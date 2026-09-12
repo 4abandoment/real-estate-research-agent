@@ -98,61 +98,114 @@ def simulate(
             booked_nights = round(rate * days)
             bookings = max(round(booked_nights / AVG_STAY_NIGHTS), 0)
             for booking in range(bookings):
-                nights = rng.randint(2, 7)
-                gross = round(feature.price * nights, 2)
-                issued = month_start + timedelta(days=rng.randint(0, days - 1))
-                due = issued + timedelta(days=14)
-                reference = f"{feature.listing_id}-{issued.isoformat()}-{booking}"
-
-                roll = rng.random()
-                if roll < 0.04:
-                    status = "overdue"
-                elif roll < 0.10:
-                    status = "pending"
-                else:
-                    status = "paid"
-
-                entries.append(
-                    (
-                        feature.listing_id,
-                        month_start,
-                        "invoice",
-                        gross,
-                        status,
-                        due,
-                        issued,
-                        reference,
-                    )
-                )
-                if status == "paid":
-                    payout = round(gross - gross * SERVICE_FEE_RATE, 2)
-                    entries.append(
-                        (
-                            feature.listing_id,
-                            month_start,
-                            "payment",
-                            payout,
-                            "paid",
-                            due,
-                            issued + timedelta(days=rng.randint(0, 10)),
-                            reference,
-                        )
-                    )
-                if rng.random() < 0.03:
-                    refund = -round(gross * rng.uniform(0.2, 1.0), 2)
-                    entries.append(
-                        (
-                            feature.listing_id,
-                            month_start,
-                            "refund",
-                            refund,
-                            "refunded",
-                            None,
-                            issued + timedelta(days=rng.randint(1, 20)),
-                            reference,
-                        )
-                    )
+                entries.extend(_booking_entries(feature, month_start, days, booking, rng))
     return entries
+
+
+def _booking_entries(
+    feature: ListingFeature, month_start: date, days: int, booking: int, rng: random.Random
+) -> list[tuple]:
+    nights = rng.randint(2, 7)
+    gross = round(feature.price * nights + CLEANING_FEE_GBP, 2)
+    issued = month_start + timedelta(days=rng.randint(0, days - 1))
+    due = issued + timedelta(days=14)
+    reference = f"{feature.listing_id}-{issued.isoformat()}-{booking}"
+
+    roll = rng.random()
+    if roll < 0.04:
+        status = "overdue"
+    elif roll < 0.10:
+        status = "pending"
+    elif roll < 0.18:
+        status = "partial"
+    else:
+        status = "paid"
+
+    entries = [(feature.listing_id, month_start, "invoice", gross, status, due, issued, reference)]
+
+    if status in ("overdue", "pending"):
+        entries.extend(_maybe_refund(feature, month_start, gross, issued, reference, rng))
+        return entries
+
+    service_fee = round(gross * SERVICE_FEE_RATE, 2)
+    vat = round(service_fee * VAT_RATE, 2)
+    payout = round(gross - service_fee - vat, 2)
+    entries.append(
+        (feature.listing_id, month_start, "fee", -service_fee, "deducted", None, issued, reference)
+    )
+    entries.append(
+        (feature.listing_id, month_start, "tax", -vat, "deducted", None, issued, reference)
+    )
+
+    if status == "partial":
+        paid = round(payout * rng.uniform(0.3, 0.8), 2)
+        entries.append(
+            (
+                feature.listing_id,
+                month_start,
+                "payment",
+                paid,
+                "partial",
+                due,
+                issued + timedelta(days=rng.randint(0, 10)),
+                reference,
+            )
+        )
+    else:
+        entries.append(
+            (
+                feature.listing_id,
+                month_start,
+                "payment",
+                payout,
+                "paid",
+                due,
+                issued + timedelta(days=rng.randint(0, 10)),
+                reference,
+            )
+        )
+        if rng.random() < 0.02:
+            chargeback = -round(gross * rng.uniform(0.5, 1.0), 2)
+            entries.append(
+                (
+                    feature.listing_id,
+                    month_start,
+                    "chargeback",
+                    chargeback,
+                    "charged_back",
+                    None,
+                    issued + timedelta(days=rng.randint(5, 40)),
+                    reference,
+                )
+            )
+
+    entries.extend(_maybe_refund(feature, month_start, gross, issued, reference, rng))
+    return entries
+
+
+def _maybe_refund(
+    feature: ListingFeature,
+    month_start: date,
+    gross: float,
+    issued: date,
+    reference: str,
+    rng: random.Random,
+) -> list[tuple]:
+    if rng.random() >= 0.03:
+        return []
+    refund = -round(gross * rng.uniform(0.2, 1.0), 2)
+    return [
+        (
+            feature.listing_id,
+            month_start,
+            "refund",
+            refund,
+            "refunded",
+            None,
+            issued + timedelta(days=rng.randint(1, 20)),
+            reference,
+        )
+    ]
 
 
 def load_features(conn) -> list[ListingFeature]:

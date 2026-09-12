@@ -1,0 +1,12 @@
+id: leasing_warehouse
+name: Property and leasing warehouse
+description: >
+  Structured warehouse of short-let property performance: listings, nightly
+  calendar availability and pricing, and the modelled finance ledger. Use for
+  quantitative questions about pricing, occupancy, revenue, bookings and
+  average daily rate across properties and neighbourhoods.
+retrieval: sql
+tables:
+  - listings
+  - calendar
+  - transactions
