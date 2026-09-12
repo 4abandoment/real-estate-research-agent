@@ -14,8 +14,11 @@ class Embedder:
     def __init__(self, model_name: str = MODEL_NAME) -> None:
         self._model = TextEmbedding(model_name=model_name)
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[float(value) for value in vector] for vector in self._model.embed(texts)]
+    def embed(self, texts: list[str], batch_size: int = 64) -> list[list[float]]:
+        return [
+            [float(value) for value in vector]
+            for vector in self._model.embed(texts, batch_size=batch_size)
+        ]
 
     @staticmethod
     def to_pgvector(vector: list[float]) -> str:
