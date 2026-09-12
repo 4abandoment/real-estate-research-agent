@@ -19,6 +19,66 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS messages_thread_idx
     ON messages (channel_id, thread_ts, created_at);
+
+CREATE TABLE IF NOT EXISTS listings (
+    id BIGINT PRIMARY KEY,
+    name TEXT,
+    host_id BIGINT,
+    host_name TEXT,
+    neighbourhood TEXT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    room_type TEXT,
+    price_gbp NUMERIC(10, 2),
+    minimum_nights INTEGER,
+    number_of_reviews INTEGER,
+    review_scores_rating NUMERIC(3, 2),
+    availability_365 INTEGER,
+    license TEXT
+);
+
+CREATE TABLE IF NOT EXISTS calendar (
+    listing_id BIGINT NOT NULL,
+    date DATE NOT NULL,
+    available BOOLEAN,
+    price_gbp NUMERIC(10, 2),
+    adjusted_price_gbp NUMERIC(10, 2),
+    minimum_nights INTEGER,
+    maximum_nights INTEGER,
+    PRIMARY KEY (listing_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS reviews (
+    id BIGINT PRIMARY KEY,
+    listing_id BIGINT NOT NULL,
+    date DATE,
+    reviewer_id BIGINT,
+    reviewer_name TEXT,
+    comments TEXT
+);
+
+CREATE INDEX IF NOT EXISTS reviews_listing_idx ON reviews (listing_id);
+
+CREATE TABLE IF NOT EXISTS land_registry (
+    transaction_id TEXT PRIMARY KEY,
+    price INTEGER,
+    date_of_transfer DATE,
+    postcode TEXT,
+    property_type TEXT,
+    old_new TEXT,
+    duration TEXT,
+    paon TEXT,
+    saon TEXT,
+    street TEXT,
+    locality TEXT,
+    town_city TEXT,
+    district TEXT,
+    county TEXT,
+    ppd_category_type TEXT,
+    record_status TEXT
+);
+
+CREATE INDEX IF NOT EXISTS land_registry_postcode_idx ON land_registry (postcode);
 """
 
 
