@@ -118,6 +118,25 @@ CREATE TABLE IF NOT EXISTS neighbourhood_links (
     PRIMARY KEY (ppd_district, listing_neighbourhood)
 );
 
+CREATE TABLE IF NOT EXISTS policy_documents (
+    id BIGSERIAL PRIMARY KEY,
+    source_url TEXT NOT NULL,
+    title TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    embedding vector(384)
+);
+
+CREATE TABLE IF NOT EXISTS review_embeddings (
+    review_id BIGINT PRIMARY KEY,
+    listing_id BIGINT NOT NULL,
+    content TEXT NOT NULL,
+    embedding vector(384)
+);
+
+CREATE INDEX IF NOT EXISTS review_embeddings_listing_idx
+    ON review_embeddings (listing_id);
+
 CREATE OR REPLACE VIEW neighbourhood_market AS
 SELECT n.listing_neighbourhood AS neighbourhood,
        (SELECT count(*) FROM listings l
