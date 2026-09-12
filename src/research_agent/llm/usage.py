@@ -6,10 +6,12 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from research_agent.config import load_settings
-from research_agent.llm.client import LLMResponse
+
+if TYPE_CHECKING:
+    from research_agent.llm.client import LLMResponse
 
 # ponytail: public list prices (USD per million tokens); update if rates change.
 PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
@@ -17,7 +19,7 @@ PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-sonnet-5": (3.0, 15.0),
 }
 
-T = TypeVar("T", bound=LLMResponse)
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     return (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
 
 
-def log_usage(task: str, response: LLMResponse) -> UsageEntry:
+def log_usage(task: str, response: "LLMResponse") -> UsageEntry:
     entry = UsageEntry(
         ts=time.time(),
         task=task,

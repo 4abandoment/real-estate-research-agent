@@ -143,6 +143,30 @@ CREATE TABLE IF NOT EXISTS review_embedding_staging (
     embedding vector(384)
 );
 
+CREATE TABLE IF NOT EXISTS query_log (
+    id BIGSERIAL PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    thread_ts TEXT,
+    question TEXT NOT NULL,
+    sql TEXT,
+    sources TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS query_log_channel_idx
+    ON query_log (channel_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS pending_approvals (
+    id BIGSERIAL PRIMARY KEY,
+    origin_channel_id TEXT NOT NULL,
+    origin_thread_ts TEXT NOT NULL,
+    question TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    admin_thread_ts TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE OR REPLACE VIEW neighbourhood_market AS
 SELECT n.listing_neighbourhood AS neighbourhood,
        (SELECT count(*) FROM listings l
@@ -198,3 +222,67 @@ class ConversationStore:
             (channel_id, thread_ts, limit),
         ).fetchall()
         return [Message(role=role, content=content) for role, content in reversed(rows)]
+
+
+def record_query(
+    conn: psycopg.Connection,
+    *,
+    channel_id: str,
+    thread_ts: str | None,
+    question: str,
+    sql: str | None = None,
+    sources: str | None = None,
+) -> None:
+    conn.execute(
+        "INSERT INTO query_log (channel_id, thread_ts, question, sql, sources)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (channel_id, thread_ts, question, sql, sources),
+    )
+
+
+def last_query(conn: psycopg.Connection, *, channel_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT question, sql, sources, created_at FROM query_log"
+        " WHERE channel_id = %s ORDER BY created_at DESC LIMIT 1",
+        (channel_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"question": row[0], "sql": row[1], "sources": row[2], "created_at": row[3]}
+
+
+def create_approval(
+    conn: psycopg.Connection,
+    *,
+    origin_channel_id: str,
+    origin_thread_ts: str,
+    question: str,
+    reason: str,
+    admin_thread_ts: str,
+) -> None:
+    conn.execute(
+        "INSERT INTO pending_approvals"
+        " (origin_channel_id, origin_thread_ts, question, reason, admin_thread_ts)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (origin_channel_id, origin_thread_ts, question, reason, admin_thread_ts),
+    )
+
+
+def find_approval(conn: psycopg.Connection, *, admin_thread_ts: str) -> dict | None:
+    row = conn.execute(
+        "SELECT origin_channel_id, origin_thread_ts, question FROM pending_approvals"
+        " WHERE admin_thread_ts = %s AND status = 'pending'"
+        " ORDER BY created_at DESC LIMIT 1",
+        (admin_thread_ts,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"origin_channel_id": row[0], "origin_thread_ts": row[1], "question": row[2]}
+
+
+def resolve_approval(conn: psycopg.Connection, *, admin_thread_ts: str, guidance: str) -> None:
+    conn.execute(
+        "UPDATE pending_approvals SET status = 'resolved', reason = %s"
+        " WHERE admin_thread_ts = %s AND status = 'pending'",
+        (guidance, admin_thread_ts),
+    )

@@ -10,6 +10,8 @@ from typing import Protocol
 
 import anthropic
 
+from research_agent.llm.usage import log_usage
+
 
 @dataclass(frozen=True)
 class LLMResponse:
@@ -28,6 +30,7 @@ class LLMClient(Protocol):
         model: str,
         system: str | None = None,
         max_tokens: int = 1024,
+        task: str = "llm",
     ) -> LLMResponse: ...
 
 
@@ -42,6 +45,7 @@ class AnthropicClient:
         model: str,
         system: str | None = None,
         max_tokens: int = 1024,
+        task: str = "llm",
     ) -> LLMResponse:
         started = time.perf_counter()
         request: dict = {
@@ -54,10 +58,12 @@ class AnthropicClient:
         response = self._client.messages.create(**request)
         latency_ms = (time.perf_counter() - started) * 1000
         text = "".join(block.text for block in response.content if block.type == "text")
-        return LLMResponse(
+        result = LLMResponse(
             text=text,
             model=response.model,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
             latency_ms=latency_ms,
         )
+        log_usage(task, result)
+        return result
