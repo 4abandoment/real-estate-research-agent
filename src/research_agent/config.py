@@ -29,6 +29,9 @@ class Settings:
     slack_bot_token: str | None
     slack_app_token: str | None
     slack_admin_channel_id: str | None
+    slack_config_token: str | None
+    slack_config_refresh_token: str | None
+    slack_app_id: str | None
     anthropic_api_key: str | None
     database_url: str | None
     socket_mode: bool
@@ -41,6 +44,9 @@ def load_settings() -> Settings:
         slack_bot_token=_text("SLACK_BOT_TOKEN"),
         slack_app_token=_text("SLACK_APP_TOKEN"),
         slack_admin_channel_id=_text("SLACK_ADMIN_CHANNEL_ID"),
+        slack_config_token=_text("SLACK_CONFIG_TOKEN"),
+        slack_config_refresh_token=_text("SLACK_CONFIG_REFRESH_TOKEN"),
+        slack_app_id=_text("SLACK_APP_ID"),
         anthropic_api_key=_text("ANTHROPIC_API_KEY"),
         database_url=_text("DATABASE_URL"),
         socket_mode=_flag("SOCKET_MODE", default=True),
