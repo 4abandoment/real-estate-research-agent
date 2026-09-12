@@ -9,7 +9,10 @@ description = "Slack research agent for real-estate finance: scoping, multi-sour
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-dependencies = []
+dependencies = [
+    "slack_bolt>=1.21",
+    "python-dotenv>=1.0",
+]
 
 [project.optional-dependencies]
 dev = [
