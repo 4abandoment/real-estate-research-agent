@@ -103,6 +103,26 @@ CREATE TABLE IF NOT EXISTS playbooks (
     tables TEXT,
     embedding vector(384)
 );
+
+CREATE TABLE IF NOT EXISTS neighbourhood_links (
+    ppd_district TEXT NOT NULL,
+    listing_neighbourhood TEXT NOT NULL,
+    score DOUBLE PRECISION NOT NULL,
+    method TEXT NOT NULL,
+    PRIMARY KEY (ppd_district, listing_neighbourhood)
+);
+
+CREATE OR REPLACE VIEW neighbourhood_market AS
+SELECT n.listing_neighbourhood AS neighbourhood,
+       (SELECT count(*) FROM listings l
+         WHERE l.neighbourhood = n.listing_neighbourhood) AS listings,
+       (SELECT round(avg(l.price_gbp), 2) FROM listings l
+         WHERE l.neighbourhood = n.listing_neighbourhood) AS avg_listing_price,
+       (SELECT count(*) FROM land_registry r
+         WHERE r.district = n.ppd_district) AS sales,
+       (SELECT round(avg(r.price), 0) FROM land_registry r
+         WHERE r.district = n.ppd_district) AS avg_sale_price
+FROM neighbourhood_links n;
 """
 
 
