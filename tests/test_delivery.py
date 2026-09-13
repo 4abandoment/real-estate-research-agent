@@ -196,15 +196,10 @@ def test_failure_notice_classifies_causes() -> None:
     assert "Something went wrong" in text and infra is False
 
 
-def test_respond_infra_failure_alerts_admin_once(monkeypatch) -> None:
+def test_respond_infra_failure_alerts_admin_once() -> None:
     app_module._ALERTED.clear()
     # Hermetic: never depend on a local .env for the admin channel (CI has none).
-    monkeypatch.setattr(
-        app_module,
-        "load_settings",
-        lambda: replace(load_settings(), slack_admin_channel_id="C_ADMIN"),
-    )
-    settings = load_settings()
+    settings = replace(load_settings(), slack_admin_channel_id="C_ADMIN")
     error = psycopg.OperationalError("db down")
     client = _FakeClient()
     _respond(
