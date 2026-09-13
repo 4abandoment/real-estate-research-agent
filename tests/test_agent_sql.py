@@ -94,3 +94,15 @@ def test_validate_rejects_multiple_statements() -> None:
 def test_validate_rejects_forbidden_keyword() -> None:
     with pytest.raises(SqlValidationError):
         validate_sql("SELECT * FROM listings; CREATE TABLE x (id int)")
+
+
+def test_validate_rejects_pii_name_columns() -> None:
+    with pytest.raises(SqlValidationError):
+        validate_sql("SELECT reviewer_name FROM reviews LIMIT 5")
+    with pytest.raises(SqlValidationError):
+        validate_sql("SELECT host_name FROM listings LIMIT 5")
+
+
+def test_validate_allows_reviews_without_names() -> None:
+    result = validate_sql("SELECT listing_id, date FROM reviews LIMIT 5")
+    assert result.startswith("SELECT")
