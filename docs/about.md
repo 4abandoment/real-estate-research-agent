@@ -39,6 +39,9 @@ listings, then review search runs scoped to exactly those properties.
 
 - `/sql` — shows the last SQL query the agent ran in this channel, so any
   number can be independently verified.
+- `/progress` — on demand: what the agent is working on right now (with
+  elapsed vs typical timing), data loaded, recent questions here, pending
+  reviews, and model calls/cost to date.
 
 ## Privacy & safety
 
