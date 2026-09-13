@@ -9,6 +9,7 @@ the outcome is summarised back to the user, attributed).
 """
 
 import logging
+from pathlib import Path
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -27,12 +28,56 @@ from research_agent.db import (
 )
 from research_agent.embeddings import Embedder
 from research_agent.llm.client import AnthropicClient
+from research_agent.llm.usage import usage_totals
 
 logger = logging.getLogger(__name__)
 
 FALLBACK = "Research agent online. Ask me about the portfolio."
 MAX_REVIEW_TURNS = 4
 MIN_FOLLOWUP_CHARS = 12
+STATUS_TABLES = (
+    "listings",
+    "calendar",
+    "reviews",
+    "review_embeddings",
+    "land_registry",
+    "transactions",
+    "policy_documents",
+)
+
+
+def _status_text(conn, settings: Settings, channel_id: str | None) -> str:
+    counts = {
+        name: max(int(tuples), 0)
+        for name, tuples in conn.execute(
+            "SELECT relname, reltuples FROM pg_class WHERE relname = ANY(%s)",
+            (list(STATUS_TABLES),),
+        ).fetchall()
+    }
+    parts = [
+        "*Research agent status*",
+        "Data loaded (approx): "
+        + " · ".join(f"{name} {counts[name]:,}" for name in STATUS_TABLES if counts.get(name)),
+    ]
+    pending = conn.execute(
+        "SELECT count(*) FROM pending_approvals WHERE status = 'pending'"
+    ).fetchone()[0]
+    parts.append(f"Pending reviews: {pending}")
+    calls, cost = usage_totals(Path(settings.usage_log_path))
+    parts.append(f"Model calls to date: {calls} (est. ${cost:.2f})")
+    if channel_id:
+        recent = conn.execute(
+            "SELECT left(question, 60), to_char(created_at, 'DD Mon HH24:MI')"
+            " FROM query_log WHERE channel_id = %s"
+            " ORDER BY created_at DESC LIMIT 5",
+            (channel_id,),
+        ).fetchall()
+        if recent:
+            parts.append(
+                "Recent questions here:\n"
+                + "\n".join(f"• {question} ({when})" for question, when in recent)
+            )
+    return "\n".join(parts)
 
 
 def build_app(
@@ -74,6 +119,14 @@ def build_app(
             respond("No SQL has been run in this channel yet.")
             return
         respond(f"Last question: {record['question']}\n```{record['sql']}```")
+
+    @app.command("/status")
+    def show_status(ack, command, respond) -> None:
+        ack()
+        if conn is None:
+            respond("Status unavailable (no database connection).")
+            return
+        respond(_status_text(conn, settings, command.get("channel_id")))
 
     @app.event("message")
     def on_message(event, client) -> None:
