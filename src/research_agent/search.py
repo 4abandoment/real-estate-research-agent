@@ -50,9 +50,7 @@ def sample_reviews(
             "WITH cohort AS ("
             + embedded
             + ") SELECT r.id, r.listing_id, r.date, r.comments FROM reviews r"
-            " JOIN cohort c ON c."
-            + key
-            + " = r.listing_id"
+            " JOIN cohort c ON c." + key + " = r.listing_id"
             " WHERE r.comments IS NOT NULL"
             " ORDER BY random() LIMIT %s",
             (sample_size,),
