@@ -16,6 +16,7 @@ FORBIDDEN = re.compile(
     re.IGNORECASE,
 )
 FENCE = re.compile(r"```(?:sql)?\s*(.+?)```", re.DOTALL | re.IGNORECASE)
+UNTERMINATED_FENCE = re.compile(r"^```[a-zA-Z]*[ \t]*\n?", re.IGNORECASE)
 
 
 class SqlValidationError(ValueError):
@@ -24,7 +25,8 @@ class SqlValidationError(ValueError):
 
 def extract_sql(text: str) -> str:
     match = FENCE.search(text)
-    return (match.group(1) if match else text).strip()
+    result = match.group(1) if match else UNTERMINATED_FENCE.sub("", text)
+    return result.replace("```", "").strip()
 
 
 def validate_sql(sql: str, *, max_rows: int = MAX_ROWS) -> str:
@@ -40,13 +42,16 @@ def validate_sql(sql: str, *, max_rows: int = MAX_ROWS) -> str:
     return text
 
 
-def generate_sql(llm: LLMClient, question: str, history: str = "") -> str:
-    messages = [{"role": "user", "content": f"Question: {question}\n\nPrior context:\n{history}"}]
+def generate_sql(llm: LLMClient, question: str, history: str = "", feedback: str = "") -> str:
+    content = f"Question: {question}\n\nPrior context:\n{history}"
+    if feedback:
+        content += f"\n\n{feedback}\nReturn a corrected query."
+    messages = [{"role": "user", "content": content}]
     response = llm.complete(
         messages=messages,
         model=model_for("sql"),
         system=SQL_SYSTEM,
-        max_tokens=600,
+        max_tokens=1500,
         task="sql",
     )
     return extract_sql(response.text)

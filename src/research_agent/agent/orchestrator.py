@@ -1,5 +1,6 @@
 """The research agent: scope -> route -> retrieve -> synthesise -> escalate."""
 
+import logging
 from dataclasses import dataclass, field
 
 import psycopg
@@ -20,6 +21,8 @@ from research_agent.llm.client import LLMClient
 from research_agent.llm.model_router import model_for
 from research_agent.safety.pii import redact
 from research_agent.search import search_policy, search_reviews
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -134,15 +137,20 @@ class ResearchAgent:
         return "\n\n".join(blocks) or "No evidence retrieved.", sql
 
     def _sql_block(self, question: str, history_text: str) -> str:
-        candidate = generate_sql(self._llm, question, history_text)
-        try:
-            validated = validate_sql(candidate, max_rows=self._sql_rows)
-            columns, rows = run_sql(self._conn, validated, max_rows=self._sql_rows)
-        except (SqlValidationError, psycopg.Error) as error:
-            self._last_sql = None
-            return f"SQL attempt failed: {error}"
-        self._last_sql = validated
-        return f"SQL result:\n{format_rows(columns, rows)}"
+        feedback = ""
+        for attempt in range(2):
+            candidate = generate_sql(self._llm, question, history_text, feedback=feedback)
+            try:
+                validated = validate_sql(candidate, max_rows=self._sql_rows)
+                columns, rows = run_sql(self._conn, validated, max_rows=self._sql_rows)
+            except (SqlValidationError, psycopg.Error) as error:
+                logger.warning("SQL attempt %d failed: %s\nSQL: %s", attempt + 1, error, candidate)
+                feedback = f"Previous attempt failed with: {error}\nPrevious SQL:\n{candidate}"
+                continue
+            self._last_sql = validated
+            return f"SQL result:\n{format_rows(columns, rows)}"
+        self._last_sql = None
+        return "SQL attempt failed after one retry; a reviewer should provide the figure."
 
     def _synthesise(self, question: str, evidence: str) -> dict:
         response = self._llm.complete(

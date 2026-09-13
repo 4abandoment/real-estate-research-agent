@@ -1,7 +1,33 @@
 import psycopg
 import pytest
 
-from research_agent.agent.sql import SqlValidationError, extract_sql, run_sql, validate_sql
+from research_agent.agent.sql import (
+    SqlValidationError,
+    extract_sql,
+    generate_sql,
+    run_sql,
+    validate_sql,
+)
+from research_agent.llm.client import LLMResponse
+
+
+class _FakeClient:
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self.messages = None
+
+    def complete(self, *, messages, model, system=None, max_tokens=1024, task="llm"):
+        self.messages = messages
+        return LLMResponse(
+            text=self._text, model=model, input_tokens=1, output_tokens=1, latency_ms=1.0
+        )
+
+
+def test_generate_sql_feeds_back_previous_error() -> None:
+    client = _FakeClient("SELECT 1")
+    generate_sql(client, "q", feedback="Previous attempt failed with: boom")
+    assert "boom" in client.messages[0]["content"]
+    assert "corrected query" in client.messages[0]["content"]
 
 
 def test_run_sql_times_out_quickly() -> None:
