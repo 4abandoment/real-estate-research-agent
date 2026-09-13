@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
 FALLBACK = "Research agent online. Ask me about the portfolio."
 FAILED = "Something went wrong handling that - please try again."
 MAX_REVIEW_TURNS = 4
-MIN_FOLLOWUP_CHARS = 12
 SQL_FOLLOWUP = re.compile(r"\bsql\b", re.IGNORECASE)
 
 # ponytail: single-process bot, so in-memory in-flight tracking is enough.
@@ -193,13 +192,7 @@ def build_app(
             return
 
         # Follow-up in a thread the bot participated in (no @mention needed).
-        if (
-            agent is None
-            or store is None
-            or not thread_ts
-            or "<@" in text
-            or len(text) < MIN_FOLLOWUP_CHARS
-        ):
+        if agent is None or store is None or not thread_ts or "<@" in text:
             return
         if not store.history(channel_id=channel_id, thread_ts=thread_ts, limit=1):
             return
