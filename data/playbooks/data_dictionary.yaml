@@ -1,0 +1,15 @@
+id: data_dictionary
+name: Data dictionary
+description: >
+  What data the agent itself has access to: which tables exist, what each
+  contains, how many rows are loaded and how the sources are linked. Use for
+  meta questions like what data can you see, what is in the ledger, which
+  sources do you have, or what can I ask you about.
+retrieval: metadata
+tables:
+  - listings
+  - calendar
+  - reviews
+  - land_registry
+  - transactions
+  - policy_documents

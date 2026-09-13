@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import psycopg
 
 from research_agent.agent.parsing import parse_decision, parse_scope
-from research_agent.agent.prompts import SCOPE_SYSTEM, SYNTH_SYSTEM
+from research_agent.agent.prompts import SCHEMA_CONTEXT, SCOPE_SYSTEM, SYNTH_SYSTEM
 from research_agent.agent.router import SQL_SOURCES, route_question
 from research_agent.agent.sql import (
     SqlValidationError,
@@ -15,7 +15,7 @@ from research_agent.agent.sql import (
     run_sql,
     validate_sql,
 )
-from research_agent.db import record_query
+from research_agent.db import WAREHOUSE_TABLES, record_query
 from research_agent.embeddings import Embedder
 from research_agent.llm.client import LLMClient
 from research_agent.llm.model_router import model_for
@@ -159,7 +159,22 @@ class ResearchAgent:
                     )
                 )
 
+        if any(match["id"] == "data_dictionary" for match in matches):
+            blocks.append(self._data_dictionary_block())
+
         return "\n\n".join(blocks) or "No evidence retrieved.", sql
+
+    def _data_dictionary_block(self) -> str:
+        counts = {
+            name: max(int(tuples), 0)
+            for name, tuples in self._conn.execute(
+                "SELECT relname, reltuples FROM pg_class WHERE relname = ANY(%s)",
+                (list(WAREHOUSE_TABLES),),
+            ).fetchall()
+        }
+        lines = ["Available data (approximate row counts):"]
+        lines += [f"- {table}: {counts.get(table, 0):,}" for table in WAREHOUSE_TABLES]
+        return "\n".join(lines) + "\n" + SCHEMA_CONTEXT
 
     def _sql_block(self, question: str, history_text: str) -> tuple[str, list[int]]:
         feedback = ""
