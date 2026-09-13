@@ -9,7 +9,7 @@ listings(id, name, host_name, neighbourhood, room_type, latitude, longitude,
 calendar(listing_id, date, available boolean, price_gbp, adjusted_price_gbp,
          minimum_nights, maximum_nights)
 reviews(id, listing_id, date, reviewer_name, comments, sentiment, sentiment_score,
-         pos_score, neu_score, neg_score, topic_cleanliness, topic_noise,
+         pos_score, neu_score, neg_score, language, topic_cleanliness, topic_noise,
          topic_location, topic_checkin, topic_host_communication, topic_amenities,
          topic_space_beds, topic_safety, topic_value, topic_accuracy)
 review_baseline(id=1, total_reviews, positive_pct, neutral_pct, negative_pct,
@@ -36,9 +36,11 @@ Data notes:
 - Review enrichment: sentiment in ('positive','neutral','negative') comes from a
   lexicon classifier, with sentiment_score (compound, -1..1) and pos/neu/neg
   proportions. topic_* booleans mark whether a review mentions that theme
-  (a mention, not necessarily a complaint). NULL means not yet enriched; treat
-  as FALSE. Cohort-wide sentiment/topic statistics are computed automatically
-  from the cohort query, so do not aggregate them yourself.
+  (a mention, not necessarily a complaint). NULL means not scoreable; treat
+  as FALSE. Reviews in languages other than English are excluded from these
+  statistics (language column) - they are a known limitation, not an error.
+  Cohort-wide sentiment/topic statistics are computed automatically from the
+  cohort query, so do not aggregate them yourself.
 - review_baseline holds one row of portfolio-wide sentiment shares and topic
   rates for framing cohort results relative to average.
 """

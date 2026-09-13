@@ -120,7 +120,7 @@ def test_cohort_review_stats_formats_baseline_comparison() -> None:
         conn, cohort_sql="SELECT l.id AS listing_id FROM listings l LIMIT 500"
     )
 
-    assert "800 enriched of 1,000 total" in text
+    assert "800 scoreable of 1,000 total" in text
     assert "75% positive / 19% neutral / 6% negative" in text
     assert "portfolio average: 91% / 6% / 3%" in text
     assert "noise 10% (portfolio 10%)" in text

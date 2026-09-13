@@ -7,8 +7,11 @@ description: >
   topic_noise, topic_location, topic_checkin, topic_host_communication,
   topic_amenities, topic_space_beds, topic_safety, topic_value, topic_accuracy.
   A TRUE topic flag means the review mentions that theme, not necessarily a
-  complaint. review_baseline holds portfolio-wide rates so cohort results can be
-  framed relative to average. Use for qualitative questions about guest
+  complaint. language holds a best-effort language code; reviews in languages
+  other than English are excluded from sentiment/topic statistics (their
+  sentiment and flags are NULL) because the lexicon and anchors are
+  English-only. review_baseline holds portfolio-wide rates so cohort results
+  can be framed relative to average. Use for qualitative questions about guest
   sentiment, complaints, maintenance issues, cleanliness, host behaviour and
   recurring themes, and for statistics over the sentiment/topic flags. Free text
   itself is read via semantic sampling, not SQL.

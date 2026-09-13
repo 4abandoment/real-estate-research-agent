@@ -102,7 +102,10 @@ def cohort_review_stats(conn, *, cohort_sql: str) -> str | None:
 
     lines = ["Cohort review statistics (SQL over every enriched review in the cohort):"]
     if enriched < total:
-        lines.append(f"- reviews in cohort: {enriched:,} enriched of {total:,} total")
+        lines.append(
+            f"- reviews in cohort: {enriched:,} scoreable of {total:,} total"
+            " (non-English reviews excluded)"
+        )
     else:
         lines.append(f"- reviews in cohort: {enriched:,}")
     if baseline is not None and baseline[0]:

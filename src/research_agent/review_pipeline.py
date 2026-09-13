@@ -42,9 +42,128 @@ POSITIVE_CUTOFF = 0.05
 NEGATIVE_CUTOFF = -0.05
 TAG_RE = re.compile(r"<[^>]+>")
 
-ENRICH_COLUMNS = ["id", "sentiment", "sentiment_score", "pos_score", "neu_score", "neg_score"] + [
-    f"topic_{topic}" for topic in TOPIC_COLUMNS
-]
+# Language exclusion: VADER and the topic anchors are English-only, so
+# non-English reviews are excluded from statistics rather than mis-scored.
+# Detection is a conservative stopword heuristic (>=2 unambiguous hits);
+# ambiguous words ("die", "in", "is", "war"-in-English) are deliberately kept
+# out of the German/French/Spanish sets, and short texts default to English
+# (the corpus prior) so only confident non-English rows are excluded.
+STOPWORDS: dict[str, set[str]] = {
+    "en": {
+        "the",
+        "and",
+        "to",
+        "of",
+        "was",
+        "we",
+        "it",
+        "for",
+        "that",
+        "this",
+        "with",
+        "but",
+        "you",
+        "my",
+        "our",
+        "had",
+        "have",
+        "they",
+        "there",
+        "would",
+        "very",
+        "just",
+        "stay",
+        "stayed",
+    },
+    "de": {
+        "und",
+        "die",
+        "das",
+        "nicht",
+        "sehr",
+        "danke",
+        "ist",
+        "haben",
+        "wir",
+        "mit",
+        "für",
+        "aber",
+        "schon",
+        "gerne",
+        "wohnung",
+        "wirklich",
+        "war",
+    },
+    "fr": {
+        "je",
+        "est",
+        "pas",
+        "le",
+        "la",
+        "les",
+        "très",
+        "nous",
+        "mais",
+        "était",
+        "avec",
+        "pour",
+        "c'est",
+        "merci",
+        "séjour",
+        "superbe",
+    },
+    "es": {
+        "gracias",
+        "estaba",
+        "muy",
+        "pero",
+        "para",
+        "había",
+        "noche",
+        "estuvo",
+        "los",
+        "todas",
+    },
+    "it": {
+        "più",
+        "molto",
+        "bellissimo",
+        "grazie",
+        "casa",
+        "colazione",
+        "siamo",
+        "molta",
+        "erano",
+    },
+}
+LANGUAGE_MIN_HITS = 2
+
+ENRICH_COLUMNS = [
+    "id",
+    "language",
+    "sentiment",
+    "sentiment_score",
+    "pos_score",
+    "neu_score",
+    "neg_score",
+] + [f"topic_{topic}" for topic in TOPIC_COLUMNS]
+
+
+def detect_language(text: str) -> str:
+    """Best-effort language code; defaults to English on weak evidence."""
+    if not text:
+        return "en"
+    tokens = set(re.findall(r"[a-zà-öø-ÿ']+", text.lower()))
+    counts = {code: len(tokens & words) for code, words in STOPWORDS.items() if code != "en"}
+    best = max(counts, key=lambda code: counts[code])
+    if counts[best] >= LANGUAGE_MIN_HITS and counts[best] > len(tokens & STOPWORDS["en"]):
+        return best
+    if len(tokens & STOPWORDS["en"]) >= LANGUAGE_MIN_HITS:
+        return "en"
+    # Weak evidence: short texts default to English (corpus prior).
+    if len(tokens) <= 5:
+        return "en"
+    return "other"
 
 
 def load_taxonomy(path: Path = TOPICS_PATH) -> dict:
@@ -132,7 +251,12 @@ def enrich_rows(
         text = clean_text(comments)
         if not text:
             empty_flags = [False] * len(TOPIC_COLUMNS)
-            results.append((review_id, "neutral", 0.0, 0.0, 1.0, 0.0, *empty_flags))
+            results.append((review_id, None, "neutral", 0.0, 0.0, 1.0, 0.0, *empty_flags))
+            continue
+        language = detect_language(text)
+        if language != "en":
+            excluded = [None] * (5 + len(TOPIC_COLUMNS))
+            results.append((review_id, language, *excluded))
             continue
         scores = analyzer.polarity_scores(text)
         vector = parse_vector(embedding)
@@ -144,6 +268,7 @@ def enrich_rows(
         results.append(
             (
                 review_id,
+                language,
                 sentiment_label(scores["compound"]),
                 scores["compound"],
                 scores["pos"],
@@ -161,6 +286,7 @@ def _create_batch_table(conn) -> None:
         f"""
         CREATE TEMP TABLE IF NOT EXISTS enrich_batch (
             id BIGINT PRIMARY KEY,
+            language TEXT,
             sentiment TEXT,
             sentiment_score REAL,
             pos_score REAL,
@@ -179,6 +305,7 @@ def _write_batch(conn, results: list[tuple]) -> None:
             copy.write_row(row)
     assignments = ", ".join(
         [
+            "language = e.language",
             "sentiment = e.sentiment",
             "sentiment_score = e.sentiment_score",
             "pos_score = e.pos_score",
@@ -246,6 +373,49 @@ def backfill(
         rate = done / elapsed if elapsed else 0.0
         print(f"enriched {done:,} reviews ({rate:,.0f}/s)", flush=True)
     return done
+
+
+def language_pass(conn, *, batch_size: int = BATCH_SIZE) -> tuple[int, int]:
+    """Detect language for every review; non-English rows lose their scores.
+
+    Only confident non-English rows are written (language code + NULLed
+    enrichment); the remaining rows are bulk-marked 'en', which makes the pass
+    far cheaper than a full reprocess.
+    """
+    _create_batch_table(conn)
+    last_id = 0
+    detected = 0
+    excluded = 0
+    started = time.time()
+    while True:
+        rows = conn.execute(
+            "SELECT id, comments FROM reviews WHERE language IS NULL AND id > %s"
+            " ORDER BY id LIMIT %s",
+            (last_id, batch_size),
+        ).fetchall()
+        if not rows:
+            break
+        results = []
+        for review_id, comments in rows:
+            language = detect_language(clean_text(comments))
+            detected += 1
+            if language != "en":
+                excluded += 1
+                excluded_columns = [None] * (5 + len(TOPIC_COLUMNS))
+                results.append((review_id, language, *excluded_columns))
+        if results:
+            _write_batch(conn, results)
+        conn.commit()
+        last_id = rows[-1][0]
+        elapsed = time.time() - started
+        rate = detected / elapsed if elapsed else 0.0
+        print(
+            f"detected {detected:,} reviews ({rate:,.0f}/s), excluded {excluded:,}",
+            flush=True,
+        )
+    conn.execute("UPDATE reviews SET language = 'en' WHERE language IS NULL")
+    conn.commit()
+    return detected, excluded
 
 
 BASELINE_SQL_TEMPLATE = """
@@ -324,6 +494,11 @@ def main() -> None:
     parser.add_argument("--calibrate", type=int, default=None, help="sample N reviews, print rates")
     parser.add_argument("--baseline", action="store_true", help="rebuild the baseline row only")
     parser.add_argument(
+        "--language-only",
+        action="store_true",
+        help="detect language, excluding non-English from statistics",
+    )
+    parser.add_argument(
         "--reprocess",
         action="store_true",
         help="re-enrich every review (use after a taxonomy/threshold change)",
@@ -339,6 +514,13 @@ def main() -> None:
     taxonomy = load_taxonomy()
 
     if args.baseline:
+        row = build_baseline(conn)
+        print("baseline rebuilt:", row)
+        return
+
+    if args.language_only:
+        detected, excluded = language_pass(conn, batch_size=args.batch)
+        print(f"language pass done: {detected:,} detected, {excluded:,} excluded")
         row = build_baseline(conn)
         print("baseline rebuilt:", row)
         return
