@@ -58,7 +58,7 @@ class ResearchAgent:
             f"{message.role}: {redact(message.content)}" for message in history
         )
 
-        scope = self._scope(safe_question, history_text)
+        scope = self._scope(safe_question, history_text, clarified=len(history) >= 8)
         if scope["needs_clarification"]:
             answer = "Before I dig in:\n" + "\n".join(f"- {item}" for item in scope["questions"])
             record_query(
@@ -91,14 +91,13 @@ class ResearchAgent:
             escalation_reason=decision["reason"] or None,
         )
 
-    def _scope(self, question: str, history_text: str) -> dict:
+    def _scope(self, question: str, history_text: str, clarified: bool = False) -> dict:
+        content = f"Question: {question}\n\nHistory:\n{history_text}"
+        if clarified:
+            # ponytail: history-length cap stops endless clarification loops
+            content += "\n\nThe user has already clarified this; do not ask again."
         response = self._llm.complete(
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"Question: {question}\n\nHistory:\n{history_text}",
-                }
-            ],
+            messages=[{"role": "user", "content": content}],
             model=model_for("scope"),
             system=SCOPE_SYSTEM,
             max_tokens=300,
