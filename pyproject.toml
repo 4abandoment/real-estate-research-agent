@@ -17,6 +17,8 @@ dependencies = [
     "numpy>=1.26",
     "PyYAML>=6.0",
     "fastembed>=0.3",
+    "flask>=3.0",
+    "psutil>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +38,9 @@ extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/research_agent/monitor.py" = ["E501"]  # embedded HTML/CSS/JS template lines
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
