@@ -21,6 +21,8 @@ from research_agent.llm.usage import log_usage
 OPENROUTER_PREFIX = "openrouter/"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_TIMEOUT_S = 120
+# 402 included: observed flaky on OpenRouter even with account credits.
+RETRYABLE_STATUS = (402, 408, 429, 500, 502, 503, 524)
 
 
 @dataclass(frozen=True)
@@ -124,18 +126,33 @@ class OpenRouterClient:
             try:
                 with urllib.request.urlopen(request, timeout=OPENROUTER_TIMEOUT_S) as response:
                     data = json.loads(response.read().decode("utf-8"))
-                break
             except urllib.error.HTTPError as error:
                 # ponytail: 3 attempts on transient errors; back off linearly.
-                if attempt < 2 and error.code in (408, 429, 500, 502, 503, 524):
+                if attempt < 2 and error.code in RETRYABLE_STATUS:
                     time.sleep(2 * (attempt + 1))
                     continue
-                raise
+                body = error.read().decode("utf-8", "replace")
+                raise RuntimeError(f"OpenRouter HTTP {error.code}: {body[:300]}") from error
+            # OpenRouter also returns HTTP 200 with an upstream error body.
+            error = data.get("error")
+            if error is None:
+                break
+            code = error.get("code") if isinstance(error, dict) else None
+            if attempt < 2 and code in RETRYABLE_STATUS:
+                time.sleep(2 * (attempt + 1))
+                data = None
+                continue
+            break
         latency_ms = (time.perf_counter() - started) * 1000
         if data is None:
             raise RuntimeError("OpenRouter request failed without a response")
+        if data.get("error") is not None:
+            raise RuntimeError(f"OpenRouter error: {data['error']}")
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError(f"OpenRouter response had no choices: {str(data)[:300]}")
 
-        choice = data["choices"][0]
+        choice = choices[0]
         usage = data.get("usage", {})
         result = LLMResponse(
             text=choice["message"]["content"] or "",
