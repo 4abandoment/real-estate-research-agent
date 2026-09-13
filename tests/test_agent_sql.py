@@ -30,6 +30,16 @@ def test_generate_sql_feeds_back_previous_error() -> None:
     assert "corrected query" in client.messages[0]["content"]
 
 
+def test_format_rows_truncates_display() -> None:
+    from research_agent.agent.sql import format_rows
+
+    rows = [(i,) for i in range(25)]
+    text = format_rows(["id"], rows, display=20)
+
+    assert "(+5 more rows)" in text
+    assert text.count("\n") == 21  # header + 20 rendered rows + note
+
+
 def test_run_sql_times_out_quickly() -> None:
     pytest.importorskip("research_agent.db")
     from research_agent.config import load_settings
@@ -68,7 +78,7 @@ def test_validate_allows_cte() -> None:
 def test_validate_strips_leading_comments() -> None:
     result = validate_sql("-- overdue rent\nSELECT 1")
     assert result.startswith("SELECT")
-    assert result.endswith("LIMIT 50")
+    assert result.endswith("LIMIT 500")
 
 
 def test_validate_rejects_write_statements() -> None:
