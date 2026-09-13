@@ -80,12 +80,19 @@ def main() -> None:
     total_checks = 0
     passed_checks = 0
 
+    answers_dir = Path(settings.usage_log_path).parent / "eval_answers"
+    answers_dir.mkdir(parents=True, exist_ok=True)
+
     for name, question, patterns in QUESTIONS:
         answers = []
         for run in range(runs):
             thread = f"eval-{name}-{run}-{int(time.time())}"
             result = agent.handle(question=question, channel_id=EVAL_CHANNEL, thread_ts=thread)
             answers.append(result.answer)
+            (answers_dir / f"{name}_run{run}.md").write_text(
+                f"# {name} (run {run})\n\n{question}\n\n---\n\n{result.answer}\n",
+                encoding="utf-8",
+            )
         for pattern in patterns:
             hits = sum(1 for answer in answers if re.search(pattern, answer, re.IGNORECASE))
             total_checks += runs
