@@ -53,6 +53,12 @@ QUESTIONS = [
         "What data do you have access to?",
         [r"listings", r"calendar"],
     ),
+    (
+        "arrears_reviews",
+        "What do guests complain about most in listings with the 20% highest"
+        " total overdue invoice balances?",
+        [r"basis", r"random sample", r"#\d+|listing \d+"],
+    ),
 ]
 
 FORBIDDEN = [r"could not parse"]
