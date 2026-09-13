@@ -4,7 +4,11 @@ description: >
   Invoices, payments, refunds and chargebacks with payment status and due
   dates. Use for accounts receivable and revenue questions: overdue invoices,
   outstanding balances, arrears by neighbourhood, payment reconciliation,
-  refund exposure and cash collected.
+  refund exposure and cash collected. The ledger is modelled (July to December
+  2026), per listing with no person- or tenant-level detail. Arrears are
+  unpaid past-due invoices: type='invoice', status in ('overdue', 'partial',
+  'pending') and due_date in the past; fees and taxes are deductions, not
+  receivables.
 retrieval: sql
 tables:
   - transactions

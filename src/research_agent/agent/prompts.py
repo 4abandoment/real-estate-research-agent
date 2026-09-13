@@ -16,6 +16,18 @@ land_registry(transaction_id, price, date_of_transfer, postcode, property_type,
          old_new, duration, town_city, district, county)
 neighbourhood_market(neighbourhood, listings, avg_listing_price, sales,
          avg_sale_price)
+
+Data notes:
+- transactions is a modelled ledger (Jul-Dec 2026, synthetic but grounded in
+  real calendar occupancy): invoice = gross booking value; fee/tax are
+  deductions; payment = host payout.
+- Arrears (standard definition): type='invoice' AND status IN
+  ('overdue','partial','pending') AND due_date < CURRENT_DATE, measured by
+  amount_gbp of those invoices. Never sum fee/tax rows into arrears.
+- listing_id is the only join key between listings, calendar, reviews and
+  transactions. land_registry has no listing link: reach it via
+  neighbourhood_market (neighbourhood/district). There is no person- or
+  tenant-level data: balances are per listing, hosts only via listings.
 """
 
 SQL_SYSTEM = f"""You are a careful PostgreSQL analyst for a real-estate finance team.
