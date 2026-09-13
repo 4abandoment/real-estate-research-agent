@@ -17,6 +17,8 @@ import re
 import time
 from pathlib import Path
 
+import anthropic
+import psycopg
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
@@ -40,9 +42,13 @@ from research_agent.llm.usage import usage_totals
 logger = logging.getLogger(__name__)
 
 FALLBACK = "Research agent online. Ask me about the portfolio."
-FAILED = "Something went wrong handling that - please try again."
 MAX_REVIEW_TURNS = 4
 SQL_FOLLOWUP = re.compile(r"\bsql\b", re.IGNORECASE)
+# Slack chat.update rejects text over 4,000 chars (msg_too_long); keep a margin.
+SLACK_TEXT_LIMIT = 3900
+
+# ponytail: process-wide alert throttle; per-thread if bursts matter.
+_ALERTED: dict[str, float] = {}
 
 # ponytail: single-process bot, so in-memory in-flight tracking is enough.
 _ACTIVE: dict[str, dict] = {}
@@ -272,28 +278,29 @@ def _respond(
     except Exception as error:  # noqa: BLE001 - surface failures instead of silent threads
         logger.exception("agent run failed: %s", error)
         _clear_active(channel_id)
-        try:
-            client.chat_update(channel=channel_id, ts=placeholder["ts"], text=FAILED)
-        except Exception as update_error:  # noqa: BLE001 - best-effort failure notice
-            logger.warning("failure notice failed: %s", update_error)
+        _fail(settings, client, channel_id, placeholder["ts"], error, thread_ts)
         _unreact(client, channel_id, message_ts, "eyes")
         return
     _clear_active(channel_id)
 
-    if result.needs_human and settings.slack_admin_channel_id:
-        _escalate(settings, conn, client, channel_id, thread_ts, question, result)
-        reply = (
-            "This one needs a human reviewer. I've asked in the admin channel "
-            "and will follow up here."
-        )
-    else:
-        reply = _format_reply(result)
+    try:
+        if result.needs_human and settings.slack_admin_channel_id:
+            _escalate(settings, conn, client, channel_id, thread_ts, question, result)
+            reply = (
+                "This one needs a human reviewer. I've asked in the admin channel "
+                "and will follow up here."
+            )
+        else:
+            reply = _format_reply(result)
 
-    client.chat_update(channel=channel_id, ts=placeholder["ts"], text=reply)
-    _unreact(client, channel_id, message_ts, "eyes")
-    _react(client, channel_id, message_ts, "white_check_mark")
-    if store is not None:
-        store.add(channel_id=channel_id, thread_ts=thread_ts, role="assistant", content=reply)
+        _deliver(client, channel_id, thread_ts, placeholder["ts"], reply)
+        _unreact(client, channel_id, message_ts, "eyes")
+        _react(client, channel_id, message_ts, "white_check_mark")
+        if store is not None:
+            store.add(channel_id=channel_id, thread_ts=thread_ts, role="assistant", content=reply)
+    except Exception as error:  # noqa: BLE001 - never strand a thread silently
+        logger.exception("delivery failed for question %r: %s", question, error)
+        _delivery_failed(client, channel_id, placeholder["ts"])
 
 
 def _handle_admin_reply(
@@ -368,13 +375,21 @@ def _handle_admin_reply(
     except Exception as error:  # noqa: BLE001 - surface failures instead of silent threads
         logger.exception("directed re-run failed: %s", error)
         _clear_active(origin_channel)
-        client.chat_update(channel=origin_channel, ts=placeholder["ts"], text=FAILED)
+        _fail(settings, client, origin_channel, placeholder["ts"], error, origin_thread)
         return
     _clear_active(origin_channel)
     reply = _format_reply(result) + "\n_(under reviewer direction)_"
 
-    client.chat_update(channel=origin_channel, ts=placeholder["ts"], text=reply)
-    store.add(channel_id=origin_channel, thread_ts=origin_thread, role="assistant", content=reply)
+    try:
+        _deliver(client, origin_channel, origin_thread, placeholder["ts"], reply)
+        store.add(
+            channel_id=origin_channel, thread_ts=origin_thread, role="assistant", content=reply
+        )
+    except Exception as error:  # noqa: BLE001 - never strand a thread silently
+        logger.exception(
+            "directed-reply delivery failed for approval %s: %s", approval["id"], error
+        )
+        _delivery_failed(client, origin_channel, placeholder["ts"])
 
     turns = bump_approval_turns(conn, approval_id=approval["id"])
     if not result.needs_human or turns >= MAX_REVIEW_TURNS:
@@ -385,6 +400,8 @@ def _format_reply(result: AgentResult) -> str:
     reply = result.answer
     if result.sources and result.sources != ["clarify"]:
         reply += "\n_Sources: " + ", ".join(result.sources) + "_"
+    if result.warnings:
+        reply += "\n⚠️ " + " ".join(result.warnings)
     return reply
 
 
@@ -436,6 +453,86 @@ def _clean_question(text: str) -> str:
     return " ".join(parts).strip() or text.strip()
 
 
+def _chunk_text(text: str, limit: int = SLACK_TEXT_LIMIT) -> list[str]:
+    """Split text into Slack-safe chunks at line boundaries, hard-splitting
+    any single line longer than the limit. Never loses content."""
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines() or [""]:
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        if not current:
+            current = line
+        elif len(current) + 1 + len(line) <= limit:
+            current += "\n" + line
+        else:
+            chunks.append(current)
+            current = line
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _deliver(client, channel_id, thread_ts, placeholder_ts, reply: str) -> None:
+    """Post the final reply. chat.update caps at 4,000 chars, so long replies
+    update the placeholder with the first chunk and post the rest as
+    thread messages (chat.postMessage allows up to 40,000)."""
+    chunks = _chunk_text(reply)
+    client.chat_update(channel=channel_id, ts=placeholder_ts, text=chunks[0])
+    for chunk in chunks[1:]:
+        client.chat_postMessage(channel=channel_id, thread_ts=thread_ts, text=chunk)
+
+
+def _delivery_failed(client, channel_id, placeholder_ts) -> None:
+    try:
+        client.chat_update(
+            channel=channel_id,
+            ts=placeholder_ts,
+            text="The answer was generated but failed to post. Check the bot logs.",
+        )
+    except Exception as error:  # noqa: BLE001 - best-effort notice
+        logger.warning("delivery-failure notice failed: %s", error)
+
+
+def _failure_notice(error: Exception, ref: str) -> tuple[str, bool]:
+    """User-facing notice + whether it looks like an infrastructure failure."""
+    if isinstance(error, (psycopg.OperationalError, psycopg.InterfaceError)):
+        return (
+            f"I can't reach the data warehouse right now. Flagged. Retry shortly. (ref {ref})",
+            True,
+        )
+    if isinstance(error, (anthropic.APIError, OSError)):
+        return f"The model is unavailable or timed out. Retry. (ref {ref})", True
+    return f"Something went wrong finishing that. Retry. (ref {ref})", False
+
+
+def _fail(settings, client, channel_id, placeholder_ts, error: Exception, ref: str) -> None:
+    notice, infra = _failure_notice(error, ref)
+    try:
+        client.chat_update(channel=channel_id, ts=placeholder_ts, text=notice)
+    except Exception as update_error:  # noqa: BLE001 - best-effort notice
+        logger.warning("failure notice failed: %s", update_error)
+    if not (infra and settings.slack_admin_channel_id):
+        return
+    key = type(error).__name__
+    if time.time() - _ALERTED.get(key, 0) < 600:
+        return
+    _ALERTED[key] = time.time()
+    try:
+        client.chat_postMessage(
+            channel=settings.slack_admin_channel_id,
+            text=f":warning: Bot error (ref {ref}): {key}: {error}",
+        )
+    except Exception as alert_error:  # noqa: BLE001 - best-effort alert
+        logger.warning("admin alert failed: %s", alert_error)
+
+
 def _build_store(settings: Settings):
     if not settings.database_url:
         logger.warning("DATABASE_URL not set; conversation history disabled")
@@ -448,6 +545,11 @@ def _build_store(settings: Settings):
 def main() -> None:
     settings = load_settings()
     logging.basicConfig(level=settings.log_level)
+    log_path = Path(settings.usage_log_path).parent / "bot.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(file_handler)
 
     if not settings.socket_mode:
         raise SystemExit("HTTP transport not implemented yet. Set SOCKET_MODE=true.")
