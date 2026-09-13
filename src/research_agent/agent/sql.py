@@ -18,6 +18,7 @@ FORBIDDEN = re.compile(
 )
 FENCE = re.compile(r"```(?:sql)?\s*(.+?)```", re.DOTALL | re.IGNORECASE)
 UNTERMINATED_FENCE = re.compile(r"^```[a-zA-Z]*[ \t]*\n?", re.IGNORECASE)
+PII_COLUMNS = re.compile(r"\b(reviewer_name|host_name)\b", re.IGNORECASE)
 
 
 class SqlValidationError(ValueError):
@@ -38,6 +39,10 @@ def validate_sql(sql: str, *, max_rows: int = FETCH_ROWS) -> str:
         raise SqlValidationError("only SELECT or WITH queries are allowed")
     if FORBIDDEN.search(text):
         raise SqlValidationError("query contains a forbidden keyword")
+    if PII_COLUMNS.search(text):
+        raise SqlValidationError(
+            "personal name columns (reviewer_name, host_name) are not available"
+        )
     if not re.search(r"\blimit\b", text, re.IGNORECASE):
         text += f"\nLIMIT {max_rows}"
     return text
