@@ -6,9 +6,14 @@ PII redaction and human-in-the-loop escalation to an admin channel.
 Roles: the user owns question intent (clarifications go back to them, in
 thread); the admin reviewer owns judgement (their guidance is acted on and
 the outcome is summarised back to the user, attributed).
+
+Progress is proactive: a placeholder message is posted immediately, edited in
+place at each pipeline stage, and finished with the answer; the user's message
+gets a :eyes: reaction while working and :white_check_mark: when done.
 """
 
 import logging
+import time
 from pathlib import Path
 
 from slack_bolt import App
@@ -37,6 +42,25 @@ FALLBACK = "Research agent online. Ask me about the portfolio."
 MAX_REVIEW_TURNS = 4
 MIN_FOLLOWUP_CHARS = 12
 
+# ponytail: single-process bot, so in-memory in-flight tracking is enough.
+_ACTIVE: dict[str, dict] = {}
+_DURATIONS: list[float] = []
+
+
+def _note_active(channel_id: str, question: str) -> None:
+    _ACTIVE[channel_id] = {"question": question, "started": time.time()}
+
+
+def _clear_active(channel_id: str) -> None:
+    run = _ACTIVE.pop(channel_id, None)
+    if run:
+        _DURATIONS.append(time.time() - run["started"])
+        del _DURATIONS[:-20]
+
+
+def _typical_seconds() -> float | None:
+    return sum(_DURATIONS) / len(_DURATIONS) if _DURATIONS else None
+
 
 def _status_text(conn, settings: Settings, channel_id: str | None) -> str:
     counts = {
@@ -55,6 +79,14 @@ def _status_text(conn, settings: Settings, channel_id: str | None) -> str:
         "SELECT count(*) FROM pending_approvals WHERE status = 'pending'"
     ).fetchone()[0]
     parts.append(f"Pending reviews: {pending}")
+    typical = _typical_seconds()
+    run = _ACTIVE.get(channel_id or "")
+    if run:
+        elapsed = time.time() - run["started"]
+        suffix = f", typical ~{typical:.0f}s" if typical else ""
+        parts.append(f"In progress: {run['question'][:60]} — {elapsed:.0f}s elapsed{suffix}")
+    elif typical:
+        parts.append(f"Idle — typical run ~{typical:.0f}s")
     calls, cost = usage_totals(Path(settings.usage_log_path))
     parts.append(f"Model calls to date: {calls} (est. ${cost:.2f})")
     if channel_id:
@@ -97,6 +129,7 @@ def build_app(
             question=question,
             channel_id=channel_id,
             thread_ts=thread_ts,
+            message_ts=event.get("ts"),
             user_id=event.get("user"),
         )
 
@@ -165,6 +198,7 @@ def build_app(
             question=_clean_question(text),
             channel_id=channel_id,
             thread_ts=thread_ts,
+            message_ts=event.get("ts"),
             user_id=event.get("user"),
         )
 
@@ -181,6 +215,7 @@ def _respond(
     question,
     channel_id,
     thread_ts,
+    message_ts=None,
     user_id=None,
 ) -> None:
     if store is not None:
@@ -196,7 +231,24 @@ def _respond(
         _post(client, channel_id, thread_ts, FALLBACK)
         return
 
-    result = agent.handle(question=question, channel_id=channel_id, thread_ts=thread_ts)
+    _react(client, channel_id, message_ts, "eyes")
+    placeholder = client.chat_postMessage(
+        channel=channel_id, thread_ts=thread_ts, text="Researching… :eyes:"
+    )
+    _note_active(channel_id, question)
+
+    def progress(stage: str) -> None:
+        try:
+            client.chat_update(channel=channel_id, ts=placeholder["ts"], text=f"{stage}… :eyes:")
+        except Exception as error:  # noqa: BLE001 - progress is best-effort
+            logger.warning("progress update failed: %s", error)
+
+    try:
+        result = agent.handle(
+            question=question, channel_id=channel_id, thread_ts=thread_ts, progress=progress
+        )
+    finally:
+        _clear_active(channel_id)
 
     if result.needs_human and settings.slack_admin_channel_id:
         _escalate(settings, conn, client, channel_id, thread_ts, question, result)
@@ -207,7 +259,9 @@ def _respond(
     else:
         reply = _format_reply(result)
 
-    _post(client, channel_id, thread_ts, reply)
+    client.chat_update(channel=channel_id, ts=placeholder["ts"], text=reply)
+    _unreact(client, channel_id, message_ts, "eyes")
+    _react(client, channel_id, message_ts, "white_check_mark")
     if store is not None:
         store.add(channel_id=channel_id, thread_ts=thread_ts, role="assistant", content=reply)
 
@@ -258,11 +312,33 @@ def _handle_admin_reply(
         role="system",
         content=f"Reviewer direction: {text}",
     )
-    result = agent.handle(
-        question=approval["question"], channel_id=origin_channel, thread_ts=origin_thread
+    placeholder = client.chat_postMessage(
+        channel=origin_channel,
+        thread_ts=origin_thread,
+        text="Acting on reviewer guidance… :eyes:",
     )
+    _note_active(origin_channel, approval["question"])
+
+    def progress(stage: str) -> None:
+        try:
+            client.chat_update(
+                channel=origin_channel, ts=placeholder["ts"], text=f"{stage}… :eyes:"
+            )
+        except Exception as error:  # noqa: BLE001 - progress is best-effort
+            logger.warning("progress update failed: %s", error)
+
+    try:
+        result = agent.handle(
+            question=approval["question"],
+            channel_id=origin_channel,
+            thread_ts=origin_thread,
+            progress=progress,
+        )
+    finally:
+        _clear_active(origin_channel)
     reply = _format_reply(result) + "\n_(under reviewer direction)_"
-    _post(client, origin_channel, origin_thread, reply)
+
+    client.chat_update(channel=origin_channel, ts=placeholder["ts"], text=reply)
     store.add(channel_id=origin_channel, thread_ts=origin_thread, role="assistant", content=reply)
 
     turns = bump_approval_turns(conn, approval_id=approval["id"])
@@ -279,6 +355,24 @@ def _format_reply(result: AgentResult) -> str:
 
 def _post(client, channel_id, thread_ts, text) -> None:
     client.chat_postMessage(channel=channel_id, thread_ts=thread_ts, text=text)
+
+
+def _react(client, channel_id, message_ts, name) -> None:
+    if not message_ts:
+        return
+    try:
+        client.reactions_add(channel=channel_id, timestamp=message_ts, name=name)
+    except Exception as error:  # noqa: BLE001 - already-reacted / missing ts are fine
+        logger.debug("react %s failed: %s", name, error)
+
+
+def _unreact(client, channel_id, message_ts, name) -> None:
+    if not message_ts:
+        return
+    try:
+        client.reactions_remove(channel=channel_id, timestamp=message_ts, name=name)
+    except Exception as error:  # noqa: BLE001 - best-effort cleanup
+        logger.debug("unreact %s failed: %s", name, error)
 
 
 def _escalate(settings, conn, client, channel_id, thread_ts, question, result) -> None:

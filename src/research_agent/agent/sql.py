@@ -6,7 +6,8 @@ from research_agent.agent.prompts import SQL_SYSTEM
 from research_agent.llm.client import LLMClient
 from research_agent.llm.model_router import model_for
 
-MAX_ROWS = 50
+FETCH_ROWS = 500
+DISPLAY_ROWS = 20
 
 READ_ONLY = re.compile(r"^(select|with)\b", re.IGNORECASE)
 LEADING_COMMENTS = re.compile(r"^\s*(?:(?:--[^\n]*\n)|(?:/\*.*?\*/)\s*)*", re.DOTALL)
@@ -29,7 +30,7 @@ def extract_sql(text: str) -> str:
     return result.replace("```", "").strip()
 
 
-def validate_sql(sql: str, *, max_rows: int = MAX_ROWS) -> str:
+def validate_sql(sql: str, *, max_rows: int = FETCH_ROWS) -> str:
     text = LEADING_COMMENTS.sub("", sql.strip()).strip().rstrip(";").strip()
     if ";" in text:
         raise SqlValidationError("multiple statements are not allowed")
@@ -58,20 +59,22 @@ def generate_sql(llm: LLMClient, question: str, history: str = "", feedback: str
 
 
 def run_sql(
-    conn, sql: str, *, max_rows: int = MAX_ROWS, timeout_s: int = 30
+    conn, sql: str, *, fetch_rows: int = FETCH_ROWS, timeout_s: int = 30
 ) -> tuple[list[str], list[tuple]]:
     # ponytail: statement cap so a runaway scan fails fast instead of hanging the demo.
     conn.execute(f"SET statement_timeout = '{timeout_s}s'")
     try:
         cursor = conn.execute(sql)
         columns = [description.name for description in cursor.description]
-        return columns, cursor.fetchmany(max_rows)
+        return columns, cursor.fetchmany(fetch_rows)
     finally:
         conn.execute("SET statement_timeout = 0")
 
 
-def format_rows(columns: list[str], rows: list[tuple]) -> str:
+def format_rows(columns: list[str], rows: list[tuple], display: int = DISPLAY_ROWS) -> str:
     lines = [" | ".join(columns)]
-    for row in rows:
+    for row in rows[:display]:
         lines.append(" | ".join("" if value is None else str(value) for value in row))
+    if len(rows) > display:
+        lines.append(f"(+{len(rows) - display} more rows)")
     return "\n".join(lines)

@@ -27,6 +27,9 @@ human reviewer when confidence is low or the question needs judgement.
 - Every retrieval source implements the `DataSource` protocol in `sources/base.py`.
 - Secrets live in `.env` (gitignored). Never log secrets or PII.
 - Conventional commits, one logical change per commit, feature branches + PRs.
+- Prompt or agent-pipeline changes require an eval run
+  (`python scripts/eval_questions.py`) before merging; paste the pass-rate
+  report into the PR body. Answer quality is measured, not eyeballed.
 - Raw datasets are gitignored; only ingestion scripts and redacted samples are committed.
 
 ## Environment and commands

@@ -1,6 +1,7 @@
 """The research agent: scope -> route -> retrieve -> synthesise -> escalate."""
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import psycopg
@@ -20,9 +21,11 @@ from research_agent.embeddings import Embedder
 from research_agent.llm.client import LLMClient
 from research_agent.llm.model_router import model_for
 from research_agent.safety.pii import redact
-from research_agent.search import search_policy, search_reviews
+from research_agent.search import sample_reviews, search_policy, search_reviews
 
 logger = logging.getLogger(__name__)
+
+Progress = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -56,16 +59,30 @@ class ResearchAgent:
         conn,
         embedder: Embedder,
         conversation,
-        sql_rows: int = 50,
+        sample_size: int = 30,
+        sample_seed: float | None = None,
     ) -> None:
         self._llm = llm
         self._conn = conn
         self._embedder = embedder
         self._conversation = conversation
-        self._sql_rows = sql_rows
+        self._sample_size = sample_size
+        self._sample_seed = sample_seed
         self._last_sql: str | None = None
 
-    def handle(self, *, question: str, channel_id: str, thread_ts: str) -> AgentResult:
+    def handle(
+        self,
+        *,
+        question: str,
+        channel_id: str,
+        thread_ts: str,
+        progress: Progress | None = None,
+    ) -> AgentResult:
+        def report(stage: str) -> None:
+            if progress is not None:
+                progress(stage)
+
+        report("Scoping your question")
         safe_question = redact(question)
         history = self._conversation.history(channel_id=channel_id, thread_ts=thread_ts, limit=10)
         history_text = "\n".join(
@@ -84,10 +101,12 @@ class ResearchAgent:
             )
             return AgentResult(answer=answer, sources=["clarify"])
 
+        report("Prioritising sources")
         matches = route_question(self._conn, self._embedder, safe_question, top_k=3)
         source_ids = [match["id"] for match in matches]
-        evidence, sql = self._retrieve(safe_question, matches, history_text)
+        evidence, sql = self._retrieve(safe_question, matches, history_text, report)
 
+        report("Writing the answer")
         decision = self._synthesise(safe_question, evidence)
         record_query(
             self._conn,
@@ -120,33 +139,59 @@ class ResearchAgent:
         return parse_scope(response.text)
 
     def _retrieve(
-        self, question: str, matches: list[dict], history_text: str
+        self,
+        question: str,
+        matches: list[dict],
+        history_text: str,
+        report: Progress | None = None,
     ) -> tuple[str, str | None]:
+        def tell(stage: str) -> None:
+            if report is not None:
+                report(stage)
+
         blocks: list[str] = []
         sql: str | None = None
         listing_ids: list[int] = []
 
         if any(match["id"] in SQL_SOURCES for match in matches):
+            tell("Querying the warehouse")
             block, listing_ids = self._sql_block(question, history_text)
             blocks.append(block)
             sql = self._last_sql
 
         if any(match["id"] == "guest_reviews" for match in matches):
-            # ponytail: scoped search filters after the IVFFlat scan, so recall
-            # drops on small listing sets; bump probes if that ever matters.
-            hits = search_reviews(
-                self._conn,
-                self._embedder,
-                question,
-                top_k=5,
-                listing_ids=listing_ids or None,
-            )
-            if hits:
-                scope = " (scoped to the listings above)" if listing_ids else ""
-                blocks.append(
-                    f"Guest reviews{scope}:\n"
-                    + "\n".join(f"- {redact(hit['content'])}" for hit in hits)
+            tell("Sampling guest reviews")
+            if listing_ids:
+                # Measurement base: unbiased random sample of the scoped cohort.
+                sampled = sample_reviews(
+                    self._conn,
+                    listing_ids=listing_ids,
+                    sample_size=self._sample_size,
+                    seed=self._sample_seed,
                 )
+                if sampled:
+                    blocks.append(
+                        f"Random sample of {len(sampled)} reviews from the"
+                        f" {len(listing_ids)} scoped listings (measurement base):\n"
+                        + "\n".join(
+                            f"- #{item['id']} (listing {item['listing_id']},"
+                            f" {item['date']}): {redact(item['content'])}"
+                            for item in sampled
+                        )
+                    )
+            else:
+                # Illustration only: most-similar excerpts, not a random sample.
+                hits = search_reviews(self._conn, self._embedder, question, top_k=5)
+                if hits:
+                    blocks.append(
+                        "Guest reviews (illustrative most-similar excerpts,"
+                        " not a random sample):\n"
+                        + "\n".join(
+                            f"- #{hit['id']} (listing {hit['listing_id']}):"
+                            f" {redact(hit['content'])}"
+                            for hit in hits
+                        )
+                    )
 
         if any(match["id"] == "policy_kb" for match in matches):
             hits = search_policy(self._conn, self._embedder, question, top_k=5)
@@ -181,8 +226,8 @@ class ResearchAgent:
         for attempt in range(2):
             candidate = generate_sql(self._llm, question, history_text, feedback=feedback)
             try:
-                validated = validate_sql(candidate, max_rows=self._sql_rows)
-                columns, rows = run_sql(self._conn, validated, max_rows=self._sql_rows)
+                validated = validate_sql(candidate)
+                columns, rows = run_sql(self._conn, validated)
             except (SqlValidationError, psycopg.Error) as error:
                 logger.warning("SQL attempt %d failed: %s\nSQL: %s", attempt + 1, error, candidate)
                 feedback = f"Previous attempt failed with: {error}\nPrevious SQL:\n{candidate}"

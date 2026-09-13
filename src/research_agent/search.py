@@ -11,13 +11,31 @@ def _query_vector(embedder: Embedder, query: str) -> str:
     return Embedder.to_pgvector(embedder.embed([query])[0])
 
 
+def sample_reviews(
+    conn, *, listing_ids: list[int], sample_size: int = 30, seed: float | None = None
+) -> list[dict]:
+    """Unbiased random sample of reviews from the scoped listings.
+
+    ``seed`` makes the draw reproducible (used by the eval harness).
+    """
+    if seed is not None:
+        conn.execute("SELECT setseed(%s)", (seed,))
+    rows = conn.execute(
+        "SELECT r.id, r.listing_id, r.date, r.comments FROM reviews r"
+        " WHERE r.listing_id = ANY(%s) AND r.comments IS NOT NULL"
+        " ORDER BY random() LIMIT %s",
+        (listing_ids, sample_size),
+    ).fetchall()
+    return [{"id": row[0], "listing_id": row[1], "date": row[2], "content": row[3]} for row in rows]
+
+
 def search_reviews(
     conn, embedder: Embedder, query: str, top_k: int = 5, listing_ids: list[int] | None = None
 ) -> list[dict]:
     vector = _query_vector(embedder, query)
     if listing_ids:
         rows = conn.execute(
-            "SELECT r.listing_id, r.comments, e.embedding <=> %s::halfvec AS distance"
+            "SELECT r.id, r.listing_id, r.comments, e.embedding <=> %s::halfvec AS distance"
             " FROM review_embeddings e JOIN reviews r ON r.id = e.review_id"
             " WHERE e.listing_id = ANY(%s)"
             " ORDER BY distance LIMIT %s",
@@ -25,12 +43,20 @@ def search_reviews(
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT r.listing_id, r.comments, e.embedding <=> %s::halfvec AS distance"
+            "SELECT r.id, r.listing_id, r.comments, e.embedding <=> %s::halfvec AS distance"
             " FROM review_embeddings e JOIN reviews r ON r.id = e.review_id"
             " ORDER BY distance LIMIT %s",
             (vector, top_k),
         ).fetchall()
-    return [{"listing_id": row[0], "content": row[1], "distance": float(row[2])} for row in rows]
+    return [
+        {
+            "id": row[0],
+            "listing_id": row[1],
+            "content": row[2],
+            "distance": float(row[3]),
+        }
+        for row in rows
+    ]
 
 
 def search_policy(conn, embedder: Embedder, query: str, top_k: int = 5) -> list[dict]:
