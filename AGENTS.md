@@ -51,6 +51,9 @@ ruff format --check .
 
 # Run the bot (once implemented)
 python -m research_agent.app
+
+# Activity dashboard at http://127.0.0.1:8765 (run alongside the bot)
+python -m research_agent.monitor
 ```
 
 ## Data pipeline
