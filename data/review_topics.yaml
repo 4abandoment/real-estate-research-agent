@@ -5,7 +5,7 @@
 # flag is set when any anchor similarity clears `threshold`. Keep anchors
 # concrete and idiomatic to guest reviews. Topic ids map 1:1 to the boolean
 # `topic_*` columns on the reviews table.
-threshold: 0.30
+threshold: 0.20
 
 topics:
   - id: cleanliness

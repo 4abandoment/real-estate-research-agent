@@ -190,13 +190,16 @@ def _write_batch(conn, results: list[tuple]) -> None:
     conn.execute(f"UPDATE reviews r SET {assignments} FROM enrich_batch e WHERE r.id = e.id")
 
 
-def _fetch_batch(conn, after_id: int, limit: int) -> list[tuple]:
+def _fetch_batch(conn, after_id: int, limit: int, *, reprocess: bool = False) -> list[tuple]:
+    condition = "" if reprocess else "r.sentiment IS NULL AND "
     return conn.execute(
         """
         SELECT r.id, r.comments, e.embedding
         FROM reviews r
         LEFT JOIN review_embeddings e ON e.review_id = r.id
-        WHERE r.sentiment IS NULL AND r.id > %s
+        WHERE """
+        + condition
+        + """r.id > %s
         ORDER BY r.id
         LIMIT %s
         """,
@@ -211,6 +214,7 @@ def backfill(
     *,
     limit: int | None = None,
     batch_size: int = BATCH_SIZE,
+    reprocess: bool = False,
 ) -> int:
     analyzer = SentimentIntensityAnalyzer()
     mean = corpus_mean(conn)
@@ -218,17 +222,19 @@ def backfill(
     threshold = float(taxonomy.get("threshold", 0.3))
     _create_batch_table(conn)
 
-    start_row = conn.execute(
-        "SELECT COALESCE(max(id), 0) FROM reviews WHERE sentiment IS NOT NULL"
-    ).fetchone()
-    last_id = int(start_row[0]) if start_row else 0
+    last_id = 0
+    if not reprocess:
+        start_row = conn.execute(
+            "SELECT COALESCE(max(id), 0) FROM reviews WHERE sentiment IS NOT NULL"
+        ).fetchone()
+        last_id = int(start_row[0]) if start_row else 0
     done = 0
     started = time.time()
     while True:
         this_batch = batch_size if limit is None else min(batch_size, limit - done)
         if this_batch <= 0:
             break
-        rows = _fetch_batch(conn, last_id, this_batch)
+        rows = _fetch_batch(conn, last_id, this_batch, reprocess=reprocess)
         if not rows:
             break
         results = enrich_rows(rows, analyzer, anchors, topic_index, threshold, mean)
@@ -317,6 +323,11 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=BATCH_SIZE)
     parser.add_argument("--calibrate", type=int, default=None, help="sample N reviews, print rates")
     parser.add_argument("--baseline", action="store_true", help="rebuild the baseline row only")
+    parser.add_argument(
+        "--reprocess",
+        action="store_true",
+        help="re-enrich every review (use after a taxonomy/threshold change)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -337,7 +348,14 @@ def main() -> None:
         calibrate(conn, embedder, taxonomy, args.calibrate)
         return
 
-    done = backfill(conn, embedder, taxonomy, limit=args.limit, batch_size=args.batch)
+    done = backfill(
+        conn,
+        embedder,
+        taxonomy,
+        limit=args.limit,
+        batch_size=args.batch,
+        reprocess=args.reprocess,
+    )
     print(f"done: {done:,} reviews enriched")
     remaining = conn.execute("SELECT count(*) FROM reviews WHERE sentiment IS NULL").fetchone()[0]
     if remaining == 0 and done > 0:

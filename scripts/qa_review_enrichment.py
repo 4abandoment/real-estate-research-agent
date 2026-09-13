@@ -16,7 +16,7 @@ from research_agent.config import load_settings
 from research_agent.db import TOPIC_COLUMNS, connect
 from research_agent.llm.client import create_client
 
-MODEL = "openrouter/deepseek/deepseek-v4.1-flash"
+MODEL = "openrouter/deepseek/deepseek-v4-flash"
 MAX_TEXT_CHARS = 500
 SYSTEM = (
     "You label Airbnb guest reviews for a London short-let portfolio. For each "
