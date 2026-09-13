@@ -72,6 +72,9 @@ def main() -> None:
         embedder=Embedder(),
         conversation=ConversationStore(conn),
         sample_seed=SEED,
+        scope_max_tokens=settings.scope_max_tokens,
+        sql_max_tokens=settings.sql_max_tokens,
+        synth_max_tokens=settings.synth_max_tokens,
     )
 
     lines = [f"# Eval report — {runs} run(s) per question, seed {SEED}", ""]
