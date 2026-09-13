@@ -61,6 +61,9 @@ class ResearchAgent:
         conversation,
         sample_size: int = 30,
         sample_seed: float | None = None,
+        scope_max_tokens: int = 500,
+        sql_max_tokens: int = 3000,
+        synth_max_tokens: int = 3000,
     ) -> None:
         self._llm = llm
         self._conn = conn
@@ -68,6 +71,9 @@ class ResearchAgent:
         self._conversation = conversation
         self._sample_size = sample_size
         self._sample_seed = sample_seed
+        self._scope_max_tokens = scope_max_tokens
+        self._sql_max_tokens = sql_max_tokens
+        self._synth_max_tokens = synth_max_tokens
         self._last_sql: str | None = None
 
     def handle(
@@ -77,24 +83,32 @@ class ResearchAgent:
         channel_id: str,
         thread_ts: str,
         progress: Progress | None = None,
+        directive: str | None = None,
     ) -> AgentResult:
         def report(stage: str) -> None:
             if progress is not None:
                 progress(stage)
 
-        report("Scoping your question")
         safe_question = redact(question)
+        safe_directive = redact(directive) if directive else None
         history = self._conversation.history(channel_id=channel_id, thread_ts=thread_ts, limit=10)
         history_text = "\n".join(
             f"{message.role}: {redact(message.content)}" for message in history
         )
 
-        scope = self._scope(
-            safe_question,
-            history_text,
-            # Once a reviewer has directed the agent, stop clarifying: act on it.
-            clarified=len(history) >= 8 or any(m.role == "system" for m in history),
-        )
+        if safe_directive:
+            # Reviewer direction is authoritative: act on it, never re-clarify
+            # (a "decline this request" must produce a decline, not a question).
+            report("Following reviewer guidance")
+            scope = {"needs_clarification": False, "questions": []}
+        else:
+            report("Scoping your question")
+            scope = self._scope(
+                safe_question,
+                history_text,
+                # Once a reviewer has directed the agent, stop clarifying: act on it.
+                clarified=len(history) >= 8 or any(m.role == "system" for m in history),
+            )
         if scope["needs_clarification"]:
             answer = "Before I dig in:\n" + "\n".join(f"- {item}" for item in scope["questions"])
             record_query(
@@ -112,7 +126,7 @@ class ResearchAgent:
         evidence, sql = self._retrieve(safe_question, matches, history_text, report)
 
         report("Writing the answer")
-        decision = self._synthesise(safe_question, evidence)
+        decision = self._synthesise(safe_question, evidence, directive=safe_directive)
         record_query(
             self._conn,
             channel_id=channel_id,
@@ -138,7 +152,7 @@ class ResearchAgent:
             messages=[{"role": "user", "content": content}],
             model=model_for("scope"),
             system=SCOPE_SYSTEM,
-            max_tokens=300,
+            max_tokens=self._scope_max_tokens,
             task="scope",
         )
         return parse_scope(response.text)
@@ -229,7 +243,13 @@ class ResearchAgent:
     def _sql_block(self, question: str, history_text: str) -> tuple[str, list[int]]:
         feedback = ""
         for attempt in range(2):
-            candidate = generate_sql(self._llm, question, history_text, feedback=feedback)
+            candidate = generate_sql(
+                self._llm,
+                question,
+                history_text,
+                feedback=feedback,
+                max_tokens=self._sql_max_tokens,
+            )
             try:
                 validated = validate_sql(candidate)
                 columns, rows = run_sql(self._conn, validated)
@@ -245,17 +265,23 @@ class ResearchAgent:
         self._last_sql = None
         return "SQL attempt failed after one retry; a reviewer should provide the figure.", []
 
-    def _synthesise(self, question: str, evidence: str) -> dict:
+    def _synthesise(self, question: str, evidence: str, directive: str | None = None) -> dict:
+        content = f"Question: {question}\n\nEvidence:\n{evidence}"
+        if directive:
+            content += f"\n\nReviewer direction (authoritative): {directive}"
         response = self._llm.complete(
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"Question: {question}\n\nEvidence:\n{evidence}",
-                }
-            ],
+            messages=[{"role": "user", "content": content}],
             model=model_for("synthesize"),
             system=SYNTH_SYSTEM,
-            max_tokens=2000,
+            max_tokens=self._synth_max_tokens,
             task="synthesize",
         )
-        return parse_decision(response.text, fallback=response.text)
+        decision = parse_decision(response.text, fallback=response.text)
+        if response.truncated:
+            logger.warning(
+                "synthesize hit max_tokens=%d (%d output); answer may be cut off",
+                self._synth_max_tokens,
+                response.output_tokens,
+            )
+            decision["answer"] += "\n_(answer may be cut off)_"
+        return decision

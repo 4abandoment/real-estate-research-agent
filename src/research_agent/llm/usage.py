@@ -15,9 +15,14 @@ if TYPE_CHECKING:
     from research_agent.llm.client import LLMResponse
 
 # ponytail: public list prices (USD per million tokens); update if rates change.
+# OpenRouter rates sourced from https://openrouter.ai/api/v1/models.
 PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5-20251001": (1.0, 5.0),
     "claude-sonnet-5": (3.0, 15.0),
+    "openrouter/deepseek/deepseek-v4.1-flash": (0.15, 0.60),
+    "openrouter/deepseek/deepseek-v4-flash": (0.05, 0.10),
+    "openrouter/deepseek/deepseek-v4-pro": (1.60, 3.20),
+    "openrouter/google/gemini-2.5-flash": (0.30, 2.50),
 }
 
 T = TypeVar("T")

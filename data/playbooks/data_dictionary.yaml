@@ -2,9 +2,17 @@ id: data_dictionary
 name: Data dictionary
 description: >
   What data the agent itself has access to: which tables exist, what each
-  contains, how many rows are loaded and how the sources are linked. Use for
-  meta questions like what data can you see, what is in the ledger, which
-  sources do you have, or what can I ask you about.
+  contains, how many rows are loaded and how the sources are linked. The
+  finance ledger is modelled (synthetic but statistically grounded in real
+  calendar occupancy, July to December 2026); listings, calendar, reviews and
+  land registry sales are real. listing_id is the only join key between
+  listings, calendar, reviews and the ledger; land registry is reached via the
+  neighbourhood mapping, not per property. There is no person- or tenant-level
+  data: balances are per listing and hosts are known only through listings.
+  Arrears means unpaid past-due invoices: type='invoice', status in
+  ('overdue', 'partial', 'pending') and due_date in the past. Use for meta
+  questions like what data can you see, what is in the ledger, which sources
+  do you have, or what can I ask you about.
 retrieval: metadata
 tables:
   - listings

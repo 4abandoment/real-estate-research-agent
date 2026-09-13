@@ -33,7 +33,7 @@ from research_agent.db import (
     resolve_approval,
 )
 from research_agent.embeddings import Embedder
-from research_agent.llm.client import AnthropicClient
+from research_agent.llm.client import create_client
 from research_agent.llm.usage import usage_totals
 
 logger = logging.getLogger(__name__)
@@ -333,6 +333,7 @@ def _handle_admin_reply(
             channel_id=origin_channel,
             thread_ts=origin_thread,
             progress=progress,
+            directive=text,
         )
     finally:
         _clear_active(origin_channel)
@@ -423,10 +424,13 @@ def main() -> None:
     agent = None
     if conn is not None and settings.anthropic_api_key:
         agent = ResearchAgent(
-            llm=AnthropicClient(settings.anthropic_api_key),
+            llm=create_client(settings),
             conn=conn,
             embedder=Embedder(),
             conversation=store,
+            scope_max_tokens=settings.scope_max_tokens,
+            sql_max_tokens=settings.sql_max_tokens,
+            synth_max_tokens=settings.synth_max_tokens,
         )
     else:
         logger.warning("Agent disabled (missing DATABASE_URL or ANTHROPIC_API_KEY)")
