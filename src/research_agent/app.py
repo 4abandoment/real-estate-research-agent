@@ -23,6 +23,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from research_agent.agent.orchestrator import AgentResult, ResearchAgent
+from research_agent.agent.sql import format_rows, run_sql, validate_sql
 from research_agent.config import Settings, load_settings
 from research_agent.db import (
     WAREHOUSE_TABLES,
@@ -151,7 +152,7 @@ def build_app(
         if not record or not record["sql"]:
             respond("No SQL has been run in this channel yet.")
             return
-        text = f"Last question: {record['question']}\n```{record['sql']}```"
+        text = _sql_with_rows(conn, record)
         # Reply in the thread the query ran in; slash-command responds land
         # unthreaded in the channel root and are easy to miss.
         if record.get("thread_ts"):
@@ -245,7 +246,7 @@ def _respond(
         record = last_query(conn, channel_id=channel_id, thread_ts=thread_ts)
         if record is not None:
             if record["sql"]:
-                reply = f"Last question: {record['question']}\n```{record['sql']}```"
+                reply = _sql_with_rows(conn, record)
             else:
                 reply = "No SQL was generated for the last question in this thread."
             _post(client, channel_id, thread_ts, reply)
@@ -451,6 +452,18 @@ def _escalate(settings, conn, client, channel_id, thread_ts, question, result) -
 def _clean_question(text: str) -> str:
     parts = [part for part in text.split() if not part.startswith("<@")]
     return " ".join(parts).strip() or text.strip()
+
+
+def _sql_with_rows(conn, record) -> str:
+    """SQL text plus the top result rows, so cited ids and figures can be
+    copied straight into an independent client for verification."""
+    text = f"Last question: {record['question']}\n```{record['sql']}```"
+    try:
+        columns, rows = run_sql(conn, validate_sql(record["sql"]))
+    except Exception as error:  # noqa: BLE001 - SQL text alone is still useful
+        logger.warning("stored SQL re-run failed: %s", error)
+        return text
+    return text + f"\n*Result (top rows):*\n```{format_rows(columns, rows)}```"
 
 
 def _chunk_text(text: str, limit: int = SLACK_TEXT_LIMIT) -> list[str]:
