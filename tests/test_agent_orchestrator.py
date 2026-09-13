@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from research_agent.agent.orchestrator import ResearchAgent
@@ -157,3 +159,50 @@ def test_scripted_client_exhausted_raises() -> None:
 
     with pytest.raises(IndexError):
         generate_sql(client, "q")
+
+
+def test_routing_includes_earlier_user_turns(monkeypatch) -> None:
+    import research_agent.agent.orchestrator as orchestrator
+
+    captured: list[str] = []
+    monkeypatch.setattr(
+        orchestrator,
+        "route_question",
+        lambda conn, embedder, question, top_k=3: captured.append(question) or [],
+    )
+
+    class _StoreWithHistory:
+        def history(self, *, channel_id, thread_ts, limit=20):
+            return [
+                SimpleNamespace(
+                    role="user",
+                    content="What kind of negative reviews are common in high-arrears listings?",
+                ),
+                SimpleNamespace(role="assistant", content="Before I dig in: ..."),
+                SimpleNamespace(
+                    role="user", content="listing price, arrears measured by total overdue balance"
+                ),
+            ]
+
+    client = _ScriptedClient(
+        [
+            LLMResponse('{"needs_clarification": false, "questions": []}', "m", 1, 2, 1.0),
+            LLMResponse(SYNTH_OK, "m", 1, 2, 1.0),
+        ]
+    )
+    agent = ResearchAgent(
+        llm=client,
+        conn=_FakeConn(),
+        embedder=_FakeEmbedder(),
+        conversation=_StoreWithHistory(),
+    )
+
+    agent.handle(
+        question="listing price, arrears measured by total overdue balance",
+        channel_id="C",
+        thread_ts="T",
+    )
+
+    assert "negative reviews" in captured[0]
+    assert "total overdue balance" in captured[0]
+    assert captured[0].count("total overdue balance") == 1

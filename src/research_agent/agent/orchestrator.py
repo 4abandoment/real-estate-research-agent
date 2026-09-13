@@ -121,7 +121,13 @@ class ResearchAgent:
             return AgentResult(answer=answer, sources=["clarify"])
 
         report("Prioritising sources")
-        matches = route_question(self._conn, self._embedder, safe_question, top_k=3)
+        prior_turns = [redact(message.content) for message in history if message.role == "user"]
+        if prior_turns and prior_turns[-1].strip() == safe_question.strip():
+            prior_turns.pop()  # the current question is already stored in the thread
+        # Route on the thread's recent asks too, so sources named before a
+        # clarification round-trip still match (e.g. "negative reviews").
+        routing_input = "\n".join([*prior_turns[-3:], safe_question])
+        matches = route_question(self._conn, self._embedder, routing_input, top_k=3)
         source_ids = [match["id"] for match in matches]
         evidence, sql = self._retrieve(safe_question, matches, history_text, report)
 

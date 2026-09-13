@@ -20,13 +20,18 @@ class _FakeAnthropic:
         return None
 
 
-def test_model_for_defaults() -> None:
+def test_model_for_defaults(monkeypatch) -> None:
+    monkeypatch.delenv("MODEL_SCOPE", raising=False)
+    monkeypatch.delenv("MODEL_SQL", raising=False)
+    monkeypatch.delenv("MODEL_SYNTH", raising=False)
+
     assert model_for("scope") == CHEAP
     assert model_for("sql") == CAPABLE
     assert model_for("synthesize") == CAPABLE
 
 
 def test_model_for_env_override(monkeypatch) -> None:
+    monkeypatch.delenv("MODEL_SQL", raising=False)
     monkeypatch.setenv("MODEL_SYNTH", "openrouter/deepseek/deepseek-v4.1-flash")
 
     assert model_for("synthesize") == "openrouter/deepseek/deepseek-v4.1-flash"

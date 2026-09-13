@@ -53,14 +53,20 @@ def seed_playbooks(conn, embedder: Embedder, directory: Path = PLAYBOOK_DIR) -> 
     return len(playbooks)
 
 
-def match_sources(conn, embedder: Embedder, query: str, top_k: int = 3) -> list[dict]:
+def match_sources(
+    conn,
+    embedder: Embedder,
+    query: str,
+    top_k: int = 3,
+    required_ids: set[str] | None = None,
+) -> list[dict]:
     vector = Embedder.to_pgvector(embedder.embed([query])[0])
     rows = conn.execute(
         "SELECT id, name, retrieval, tables, embedding <=> %s::vector AS distance"
         " FROM playbooks ORDER BY distance LIMIT %s",
         (vector, top_k),
     ).fetchall()
-    return [
+    matches = [
         {
             "id": row[0],
             "name": row[1],
@@ -70,6 +76,23 @@ def match_sources(conn, embedder: Embedder, query: str, top_k: int = 3) -> list[
         }
         for row in rows
     ]
+    missing = sorted((required_ids or set()) - {match["id"] for match in matches})
+    if missing:
+        extra = conn.execute(
+            "SELECT id, name, retrieval, tables FROM playbooks WHERE id = ANY(%s)",
+            (missing,),
+        ).fetchall()
+        matches += [
+            {
+                "id": row[0],
+                "name": row[1],
+                "retrieval": row[2],
+                "tables": row[3],
+                "distance": None,
+            }
+            for row in extra
+        ]
+    return matches
 
 
 def main() -> None:
