@@ -4,6 +4,16 @@ from dataclasses import dataclass
 
 import psycopg
 
+WAREHOUSE_TABLES = (
+    "listings",
+    "calendar",
+    "reviews",
+    "review_embeddings",
+    "land_registry",
+    "transactions",
+    "policy_documents",
+)
+
 SCHEMA = """
 CREATE EXTENSION IF NOT EXISTS vector;
 

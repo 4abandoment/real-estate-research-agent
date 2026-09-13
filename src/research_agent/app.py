@@ -17,6 +17,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from research_agent.agent.orchestrator import AgentResult, ResearchAgent
 from research_agent.config import Settings, load_settings
 from research_agent.db import (
+    WAREHOUSE_TABLES,
     ConversationStore,
     apply_schema,
     bump_approval_turns,
@@ -35,15 +36,6 @@ logger = logging.getLogger(__name__)
 FALLBACK = "Research agent online. Ask me about the portfolio."
 MAX_REVIEW_TURNS = 4
 MIN_FOLLOWUP_CHARS = 12
-STATUS_TABLES = (
-    "listings",
-    "calendar",
-    "reviews",
-    "review_embeddings",
-    "land_registry",
-    "transactions",
-    "policy_documents",
-)
 
 
 def _status_text(conn, settings: Settings, channel_id: str | None) -> str:
@@ -51,13 +43,13 @@ def _status_text(conn, settings: Settings, channel_id: str | None) -> str:
         name: max(int(tuples), 0)
         for name, tuples in conn.execute(
             "SELECT relname, reltuples FROM pg_class WHERE relname = ANY(%s)",
-            (list(STATUS_TABLES),),
+            (list(WAREHOUSE_TABLES),),
         ).fetchall()
     }
     parts = [
         "*Research agent status*",
         "Data loaded (approx): "
-        + " · ".join(f"{name} {counts[name]:,}" for name in STATUS_TABLES if counts.get(name)),
+        + " · ".join(f"{name} {counts[name]:,}" for name in WAREHOUSE_TABLES if counts.get(name)),
     ]
     pending = conn.execute(
         "SELECT count(*) FROM pending_approvals WHERE status = 'pending'"
