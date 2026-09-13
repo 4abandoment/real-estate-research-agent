@@ -250,15 +250,30 @@ def record_query(
     )
 
 
-def last_query(conn: psycopg.Connection, *, channel_id: str) -> dict | None:
-    row = conn.execute(
-        "SELECT question, sql, sources, created_at FROM query_log"
-        " WHERE channel_id = %s ORDER BY created_at DESC LIMIT 1",
-        (channel_id,),
-    ).fetchone()
+def last_query(
+    conn: psycopg.Connection, *, channel_id: str, thread_ts: str | None = None
+) -> dict | None:
+    if thread_ts:
+        row = conn.execute(
+            "SELECT question, sql, sources, created_at, thread_ts FROM query_log"
+            " WHERE channel_id = %s AND thread_ts = %s ORDER BY created_at DESC LIMIT 1",
+            (channel_id, thread_ts),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT question, sql, sources, created_at, thread_ts FROM query_log"
+            " WHERE channel_id = %s ORDER BY created_at DESC LIMIT 1",
+            (channel_id,),
+        ).fetchone()
     if row is None:
         return None
-    return {"question": row[0], "sql": row[1], "sources": row[2], "created_at": row[3]}
+    return {
+        "question": row[0],
+        "sql": row[1],
+        "sources": row[2],
+        "created_at": row[3],
+        "thread_ts": row[4],
+    }
 
 
 def create_approval(
