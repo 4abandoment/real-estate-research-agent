@@ -206,3 +206,37 @@ def test_routing_includes_earlier_user_turns(monkeypatch) -> None:
     assert "negative reviews" in captured[0]
     assert "total overdue balance" in captured[0]
     assert captured[0].count("total overdue balance") == 1
+
+
+def test_review_sampling_uses_full_cohort_sql(monkeypatch) -> None:
+    import research_agent.agent.orchestrator as orchestrator
+
+    captured: dict = {}
+
+    def fake_sample(conn, **kwargs):
+        captured.update(kwargs)
+        return [{"id": 1, "listing_id": 2, "date": "2025-01-01", "content": "too noisy"}]
+
+    monkeypatch.setattr(orchestrator, "sample_reviews", fake_sample)
+    monkeypatch.setattr(
+        orchestrator,
+        "route_question",
+        lambda conn, embedder, question, top_k=3: [
+            {"id": "transactions_ledger"},
+            {"id": "guest_reviews"},
+        ],
+    )
+
+    client = _ScriptedClient(
+        [
+            LLMResponse('{"needs_clarification": false, "questions": []}', "m", 1, 2, 1.0),
+            LLMResponse("SELECT listing_id FROM transactions LIMIT 500", "m", 1, 2, 1.0),
+            LLMResponse(SYNTH_OK, "m", 1, 2, 1.0),
+        ]
+    )
+    agent = _agent(client)
+
+    agent.handle(question="what do guests complain about?", channel_id="C", thread_ts="T")
+
+    assert captured["cohort_sql"] == "SELECT listing_id FROM transactions LIMIT 500"
+    assert "full cohort" in client.calls[-1]["messages"][0]["content"]

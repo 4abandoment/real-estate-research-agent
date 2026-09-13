@@ -2,6 +2,7 @@
 
 import sys
 
+from research_agent.agent.sql import strip_limit
 from research_agent.config import load_settings
 from research_agent.db import apply_schema, connect
 from research_agent.embeddings import Embedder
@@ -11,21 +12,56 @@ def _query_vector(embedder: Embedder, query: str) -> str:
     return Embedder.to_pgvector(embedder.embed([query])[0])
 
 
+def _cohort_key_column(conn, embedded_cohort: str) -> str:
+    """Name of the cohort's listing-id column (generated SQL aliases it inconsistently)."""
+    cursor = conn.execute(f"WITH cohort AS ({embedded_cohort}) SELECT * FROM cohort LIMIT 0")
+    names = [column.name.lower() for column in (cursor.description or [])]
+    if "listing_id" in names:
+        return "listing_id"
+    if "id" in names:
+        return "id"
+    raise ValueError(f"cohort query exposes no listing id column: {names}")
+
+
 def sample_reviews(
-    conn, *, listing_ids: list[int], sample_size: int = 30, seed: float | None = None
+    conn,
+    *,
+    listing_ids: list[int] | None = None,
+    cohort_sql: str | None = None,
+    sample_size: int = 30,
+    seed: float | None = None,
 ) -> list[dict]:
     """Unbiased random sample of reviews from the scoped listings.
 
-    ``seed`` makes the draw reproducible (used by the eval harness).
+    Pass ``cohort_sql`` to draw from every listing the cohort query matches
+    (its display LIMIT is stripped first, so the sample spans the full cohort,
+    not just the fetched page); pass ``listing_ids`` to scope to an explicit
+    id list instead. ``seed`` makes the draw reproducible (used by the eval
+    harness).
     """
     if seed is not None:
         conn.execute("SELECT setseed(%s)", (seed,))
-    rows = conn.execute(
-        "SELECT r.id, r.listing_id, r.date, r.comments FROM reviews r"
-        " WHERE r.listing_id = ANY(%s) AND r.comments IS NOT NULL"
-        " ORDER BY random() LIMIT %s",
-        (listing_ids, sample_size),
-    ).fetchall()
+    if cohort_sql is not None:
+        # Literal % in the cohort SQL (e.g. ILIKE '%Soho%') must survive
+        # psycopg's placeholder parsing of the combined query.
+        embedded = strip_limit(cohort_sql).replace("%", "%%")
+        key = _cohort_key_column(conn, embedded)
+        rows = conn.execute(
+            "WITH cohort AS ("
+            + embedded
+            + ") SELECT r.id, r.listing_id, r.date, r.comments FROM reviews r"
+            " JOIN cohort c ON c." + key + " = r.listing_id"
+            " WHERE r.comments IS NOT NULL"
+            " ORDER BY random() LIMIT %s",
+            (sample_size,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT r.id, r.listing_id, r.date, r.comments FROM reviews r"
+            " WHERE r.listing_id = ANY(%s) AND r.comments IS NOT NULL"
+            " ORDER BY random() LIMIT %s",
+            (listing_ids or [], sample_size),
+        ).fetchall()
     return [{"id": row[0], "listing_id": row[1], "date": row[2], "content": row[3]} for row in rows]
 
 

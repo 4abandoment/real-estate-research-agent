@@ -22,6 +22,7 @@ FORBIDDEN = re.compile(
 FENCE = re.compile(r"```(?:sql)?\s*(.+?)```", re.DOTALL | re.IGNORECASE)
 UNTERMINATED_FENCE = re.compile(r"^```[a-zA-Z]*[ \t]*\n?", re.IGNORECASE)
 PII_COLUMNS = re.compile(r"\b(reviewer_name|host_name)\b", re.IGNORECASE)
+TRAILING_LIMIT = re.compile(r"\s+limit\s+\d+\s*$", re.IGNORECASE)
 
 
 class SqlValidationError(ValueError):
@@ -49,6 +50,11 @@ def validate_sql(sql: str, *, max_rows: int = FETCH_ROWS) -> str:
     if not re.search(r"\blimit\b", text, re.IGNORECASE):
         text += f"\nLIMIT {max_rows}"
     return text
+
+
+def strip_limit(sql: str) -> str:
+    """Drop a trailing LIMIT so a query can be reused as a full-cohort subquery."""
+    return TRAILING_LIMIT.sub("", sql.strip())
 
 
 def generate_sql(
