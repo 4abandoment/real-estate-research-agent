@@ -1,10 +1,13 @@
 """Text-to-SQL with strict read-only validation, execution and formatting."""
 
+import logging
 import re
 
 from research_agent.agent.prompts import SQL_SYSTEM
 from research_agent.llm.client import LLMClient
 from research_agent.llm.model_router import model_for
+
+logger = logging.getLogger(__name__)
 
 FETCH_ROWS = 500
 DISPLAY_ROWS = 20
@@ -48,7 +51,13 @@ def validate_sql(sql: str, *, max_rows: int = FETCH_ROWS) -> str:
     return text
 
 
-def generate_sql(llm: LLMClient, question: str, history: str = "", feedback: str = "") -> str:
+def generate_sql(
+    llm: LLMClient,
+    question: str,
+    history: str = "",
+    feedback: str = "",
+    max_tokens: int = 1500,
+) -> str:
     content = f"Question: {question}\n\nPrior context:\n{history}"
     if feedback:
         content += f"\n\n{feedback}\nReturn a corrected query."
@@ -57,9 +66,25 @@ def generate_sql(llm: LLMClient, question: str, history: str = "", feedback: str
         messages=messages,
         model=model_for("sql"),
         system=SQL_SYSTEM,
-        max_tokens=1500,
+        max_tokens=max_tokens,
         task="sql",
     )
+    if response.truncated:
+        # Truncated SQL is malformed by construction; one retry at a doubled cap
+        # beats shipping a syntax error into validation.
+        logger.warning(
+            "SQL generation hit max_tokens=%d (%d output); retrying at %d",
+            max_tokens,
+            response.output_tokens,
+            max_tokens * 2,
+        )
+        response = llm.complete(
+            messages=messages,
+            model=model_for("sql"),
+            system=SQL_SYSTEM,
+            max_tokens=max_tokens * 2,
+            task="sql",
+        )
     return extract_sql(response.text)
 
 

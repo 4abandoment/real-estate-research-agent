@@ -20,7 +20,7 @@ from research_agent.agent.orchestrator import ResearchAgent
 from research_agent.config import load_settings
 from research_agent.db import ConversationStore, apply_schema, connect
 from research_agent.embeddings import Embedder
-from research_agent.llm.client import AnthropicClient
+from research_agent.llm.client import create_client
 
 SEED = 0.42
 EVAL_CHANNEL = "C_EVAL"
@@ -67,7 +67,7 @@ def main() -> None:
     conn = connect(settings.database_url)
     apply_schema(conn)
     agent = ResearchAgent(
-        llm=AnthropicClient(settings.anthropic_api_key),
+        llm=create_client(settings),
         conn=conn,
         embedder=Embedder(),
         conversation=ConversationStore(conn),
