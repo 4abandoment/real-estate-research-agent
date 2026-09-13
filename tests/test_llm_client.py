@@ -97,3 +97,53 @@ def test_openrouter_retries_transient_error_body(monkeypatch) -> None:
 
     assert result.text == "hello"
     assert calls["count"] == 2
+
+
+def test_gateway_retries_read_timeout(monkeypatch) -> None:
+    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: None)
+    calls = {"count": 0}
+
+    def fake_urlopen(request, timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise TimeoutError("read timed out")
+        return _FakeResponse(
+            {
+                "choices": [{"message": {"content": "pong"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }
+        )
+
+    monkeypatch.setattr(client_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = client_module.OpenCodeZenClient("sk-test").complete(
+        messages=[{"role": "user", "content": "q"}],
+        model="opencode/deepseek-v4-flash",
+    )
+
+    assert result.text == "pong"
+    assert calls["count"] == 2
+
+
+def test_opencode_client_posts_to_zen_endpoint(monkeypatch) -> None:
+    urls: list[str] = []
+
+    def fake_urlopen(request, timeout):
+        urls.append(request.full_url)
+        return _FakeResponse(
+            {
+                "choices": [{"message": {"content": "pong"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }
+        )
+
+    monkeypatch.setattr(client_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = client_module.OpenCodeZenClient("sk-test").complete(
+        messages=[{"role": "user", "content": "q"}],
+        model="opencode/deepseek-v4-flash",
+    )
+
+    assert result.text == "pong"
+    assert result.model == "opencode/deepseek-v4-flash"
+    assert urls == [client_module.OPENCODE_ZEN_URL]

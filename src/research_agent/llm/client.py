@@ -3,8 +3,9 @@
 All model calls route through here so usage/cost logging and provider swaps
 stay in one place. Feature code must not import a provider SDK directly.
 
-Model ids prefixed with ``openrouter/`` are sent to OpenRouter (OpenAI-compatible
-chat completions, stdlib only); anything else goes to Anthropic.
+Model ids pick the gateway by prefix: ``openrouter/...`` goes to OpenRouter,
+``opencode/...`` to OpenCode Zen; anything else goes to Anthropic. Both
+gateways speak OpenAI-compatible chat completions (stdlib only).
 """
 
 import json
@@ -19,10 +20,14 @@ import anthropic
 from research_agent.llm.usage import log_usage
 
 OPENROUTER_PREFIX = "openrouter/"
+OPENCODE_PREFIX = "opencode/"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_TIMEOUT_S = 120
+OPENCODE_ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
+GATEWAY_TIMEOUT_S = 180
 # 402 included: observed flaky on OpenRouter even with account credits.
 RETRYABLE_STATUS = (402, 408, 429, 500, 502, 503, 524)
+# opencode.ai sits behind Cloudflare, which rejects urllib's default agent.
+GATEWAY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 
 
 @dataclass(frozen=True)
@@ -87,11 +92,14 @@ class AnthropicClient:
         return result
 
 
-class OpenRouterClient:
-    """OpenAI-compatible chat completions via OpenRouter, stdlib only."""
+class OpenAICompatibleClient:
+    """OpenAI-compatible chat completions (OpenRouter / OpenCode Zen), stdlib only."""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, *, base_url: str, model_prefix: str, label: str) -> None:
         self._api_key = api_key
+        self._base_url = base_url
+        self._model_prefix = model_prefix
+        self._label = label
 
     def complete(
         self,
@@ -104,7 +112,7 @@ class OpenRouterClient:
     ) -> LLMResponse:
         # ``model`` arrives routed (e.g. "openrouter/deepseek/deepseek-v4.1-flash");
         # the API gets the bare id, usage logging keeps the routed id.
-        bare_id = model.removeprefix(OPENROUTER_PREFIX)
+        bare_id = model.removeprefix(self._model_prefix)
         payload_messages = ([{"role": "system", "content": system}] if system else []) + list(
             messages
         )
@@ -116,15 +124,16 @@ class OpenRouterClient:
         data = None
         for attempt in range(3):
             request = urllib.request.Request(
-                OPENROUTER_URL,
+                self._base_url,
                 data=payload,
                 headers={
                     "Authorization": f"Bearer {self._api_key}",
                     "Content-Type": "application/json",
+                    "User-Agent": GATEWAY_UA,
                 },
             )
             try:
-                with urllib.request.urlopen(request, timeout=OPENROUTER_TIMEOUT_S) as response:
+                with urllib.request.urlopen(request, timeout=GATEWAY_TIMEOUT_S) as response:
                     data = json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as error:
                 # ponytail: 3 attempts on transient errors; back off linearly.
@@ -132,8 +141,14 @@ class OpenRouterClient:
                     time.sleep(2 * (attempt + 1))
                     continue
                 body = error.read().decode("utf-8", "replace")
-                raise RuntimeError(f"OpenRouter HTTP {error.code}: {body[:300]}") from error
-            # OpenRouter also returns HTTP 200 with an upstream error body.
+                raise RuntimeError(f"{self._label} HTTP {error.code}: {body[:300]}") from error
+            except (urllib.error.URLError, TimeoutError) as error:
+                # Network-level failures (read timeout, connection reset).
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                raise RuntimeError(f"{self._label} request failed: {error}") from error
+            # Gateways also return HTTP 200 with an upstream error body.
             error = data.get("error")
             if error is None:
                 break
@@ -145,12 +160,12 @@ class OpenRouterClient:
             break
         latency_ms = (time.perf_counter() - started) * 1000
         if data is None:
-            raise RuntimeError("OpenRouter request failed without a response")
+            raise RuntimeError(f"{self._label} request failed without a response")
         if data.get("error") is not None:
-            raise RuntimeError(f"OpenRouter error: {data['error']}")
+            raise RuntimeError(f"{self._label} error: {data['error']}")
         choices = data.get("choices") or []
         if not choices:
-            raise RuntimeError(f"OpenRouter response had no choices: {str(data)[:300]}")
+            raise RuntimeError(f"{self._label} response had no choices: {str(data)[:300]}")
 
         choice = choices[0]
         usage = data.get("usage", {})
@@ -166,16 +181,42 @@ class OpenRouterClient:
         return result
 
 
+class OpenRouterClient(OpenAICompatibleClient):
+    """OpenRouter gateway (``openrouter/...`` model ids)."""
+
+    def __init__(self, api_key: str) -> None:
+        super().__init__(
+            api_key,
+            base_url=OPENROUTER_URL,
+            model_prefix=OPENROUTER_PREFIX,
+            label="OpenRouter",
+        )
+
+
+class OpenCodeZenClient(OpenAICompatibleClient):
+    """OpenCode Zen gateway (``opencode/...`` model ids)."""
+
+    def __init__(self, api_key: str) -> None:
+        super().__init__(
+            api_key,
+            base_url=OPENCODE_ZEN_URL,
+            model_prefix=OPENCODE_PREFIX,
+            label="OpenCode Zen",
+        )
+
+
 class RoutedClient:
-    """Dispatches per model prefix: ``openrouter/...`` to OpenRouter, else Anthropic."""
+    """Dispatches per model prefix: openrouter/ and opencode/, else Anthropic."""
 
     def __init__(
         self,
         anthropic_client: AnthropicClient | None,
         openrouter_client: OpenRouterClient | None,
+        opencode_client: OpenCodeZenClient | None = None,
     ) -> None:
         self._anthropic = anthropic_client
         self._openrouter = openrouter_client
+        self._opencode = opencode_client
 
     def complete(
         self,
@@ -189,16 +230,16 @@ class RoutedClient:
         if model.startswith(OPENROUTER_PREFIX):
             if self._openrouter is None:
                 raise ValueError("OPENROUTER_API_KEY is not set")
-            return self._openrouter.complete(
-                messages=messages,
-                model=model,
-                system=system,
-                max_tokens=max_tokens,
-                task=task,
-            )
-        if self._anthropic is None:
-            raise ValueError("ANTHROPIC_API_KEY is not set")
-        return self._anthropic.complete(
+            client = self._openrouter
+        elif model.startswith(OPENCODE_PREFIX):
+            if self._opencode is None:
+                raise ValueError("OPENCODE_API_KEY is not set")
+            client = self._opencode
+        else:
+            if self._anthropic is None:
+                raise ValueError("ANTHROPIC_API_KEY is not set")
+            client = self._anthropic
+        return client.complete(
             messages=messages,
             model=model,
             system=system,
@@ -215,4 +256,7 @@ def create_client(settings) -> LLMClient:
     openrouter_client = (
         OpenRouterClient(settings.openrouter_api_key) if settings.openrouter_api_key else None
     )
-    return RoutedClient(anthropic_client, openrouter_client)
+    opencode_client = (
+        OpenCodeZenClient(settings.opencode_api_key) if settings.opencode_api_key else None
+    )
+    return RoutedClient(anthropic_client, openrouter_client, opencode_client)

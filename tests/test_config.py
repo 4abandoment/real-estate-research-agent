@@ -13,6 +13,12 @@ def test_reads_tokens_from_environment(monkeypatch) -> None:
     assert settings.socket_mode is False
 
 
+def test_reads_opencode_key_from_environment(monkeypatch) -> None:
+    monkeypatch.setenv("OPENCODE_API_KEY", "sk-zen-test")
+
+    assert load_settings().opencode_api_key == "sk-zen-test"
+
+
 def test_socket_mode_defaults_to_true(monkeypatch) -> None:
     monkeypatch.delenv("SOCKET_MODE", raising=False)
 

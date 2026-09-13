@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 # ponytail: public list prices (USD per million tokens); update if rates change.
 # OpenRouter rates sourced from https://openrouter.ai/api/v1/models.
+# OpenCode Zen rates sourced from https://opencode.ai/docs/zen/.
 PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5-20251001": (1.0, 5.0),
     "claude-sonnet-5": (3.0, 15.0),
@@ -25,6 +26,11 @@ PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "openrouter/google/gemini-3.7-flash": (0.75, 3.75),
     "openrouter/google/gemini-3.8-flash": (0.75, 3.75),
     "openrouter/google/gemini-2.5-flash": (0.30, 2.50),
+    "opencode/deepseek-v4-flash": (0.14, 0.28),
+    "opencode/deepseek-v4-pro": (1.74, 3.48),
+    "opencode/glm-5.3-flash": (0.15, 0.50),
+    "opencode/glm-5.3": (1.40, 4.40),
+    "opencode/minimax-m3": (0.30, 1.20),
 }
 
 T = TypeVar("T")

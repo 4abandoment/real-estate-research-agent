@@ -62,3 +62,26 @@ def test_routed_client_requires_key_for_openrouter() -> None:
             messages=[{"role": "user", "content": "q"}],
             model=f"{OPENROUTER_PREFIX}deepseek/deepseek-v4.1-flash",
         )
+
+
+def test_routed_client_dispatches_opencode_by_prefix() -> None:
+    opencode = _FakeOpenRouter()
+    client = RoutedClient(_FakeAnthropic(), None, opencode)
+
+    client.complete(
+        messages=[{"role": "user", "content": "q"}],
+        model="opencode/deepseek-v4-flash",
+    )
+
+    assert opencode.model == "opencode/deepseek-v4-flash"
+
+
+def test_routed_client_requires_key_for_opencode() -> None:
+    import pytest
+
+    client = RoutedClient(_FakeAnthropic(), None)
+    with pytest.raises(ValueError, match="OPENCODE_API_KEY"):
+        client.complete(
+            messages=[{"role": "user", "content": "q"}],
+            model="opencode/deepseek-v4-flash",
+        )
