@@ -1,3 +1,6 @@
+from dataclasses import replace
+from types import SimpleNamespace
+
 import psycopg
 
 from research_agent import app as app_module
@@ -8,6 +11,7 @@ from research_agent.app import (
     _deliver,
     _failure_notice,
     _respond,
+    _sql_with_rows,
 )
 from research_agent.config import load_settings
 
@@ -192,8 +196,14 @@ def test_failure_notice_classifies_causes() -> None:
     assert "Something went wrong" in text and infra is False
 
 
-def test_respond_infra_failure_alerts_admin_once() -> None:
+def test_respond_infra_failure_alerts_admin_once(monkeypatch) -> None:
     app_module._ALERTED.clear()
+    # Hermetic: never depend on a local .env for the admin channel (CI has none).
+    monkeypatch.setattr(
+        app_module,
+        "load_settings",
+        lambda: replace(load_settings(), slack_admin_channel_id="C_ADMIN"),
+    )
     settings = load_settings()
     error = psycopg.OperationalError("db down")
     client = _FakeClient()
@@ -233,3 +243,39 @@ def test_respond_infra_failure_alerts_admin_once() -> None:
         message_ts=None,
     )
     assert _admin_posts(second) == []
+
+
+class _RowsCursor:
+    description = [SimpleNamespace(name="listing_id"), SimpleNamespace(name="overdue_gbp")]
+
+    def fetchmany(self, size):
+        return [(13254774, 300045)]
+
+
+class _RowsConn:
+    def execute(self, *args, **kwargs):
+        return _RowsCursor()
+
+
+def test_sql_with_rows_includes_result_rows() -> None:
+    record = {
+        "question": "What is our overdue rent?",
+        "sql": "SELECT listing_id, overdue_gbp FROM transactions",
+    }
+
+    text = _sql_with_rows(_RowsConn(), record)
+
+    assert "Result (top rows)" in text
+    assert "13254774" in text and "300045" in text
+
+
+def test_sql_with_rows_falls_back_on_run_error() -> None:
+    class _BoomConn:
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    record = {"question": "q", "sql": "SELECT listing_id FROM transactions"}
+
+    text = _sql_with_rows(_BoomConn(), record)
+
+    assert "```" in text and "Result" not in text
