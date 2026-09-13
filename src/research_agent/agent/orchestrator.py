@@ -34,6 +34,20 @@ class AgentResult:
     escalation_reason: str | None = None
 
 
+def extract_listing_ids(columns: list[str], rows: list[tuple], cap: int = 200) -> list[int]:
+    """Collect distinct listing_id values from a SQL result, in row order."""
+    names = [column.lower() for column in columns]
+    if "listing_id" not in names:
+        return []
+    index = names.index("listing_id")
+    ids: list[int] = []
+    for row in rows:
+        value = row[index]
+        if value is not None and value not in ids:
+            ids.append(value)
+    return ids[:cap]
+
+
 class ResearchAgent:
     def __init__(
         self,
@@ -110,16 +124,28 @@ class ResearchAgent:
     ) -> tuple[str, str | None]:
         blocks: list[str] = []
         sql: str | None = None
+        listing_ids: list[int] = []
 
         if any(match["id"] in SQL_SOURCES for match in matches):
-            blocks.append(self._sql_block(question, history_text))
+            block, listing_ids = self._sql_block(question, history_text)
+            blocks.append(block)
             sql = self._last_sql
 
         if any(match["id"] == "guest_reviews" for match in matches):
-            hits = search_reviews(self._conn, self._embedder, question, top_k=5)
+            # ponytail: scoped search filters after the IVFFlat scan, so recall
+            # drops on small listing sets; bump probes if that ever matters.
+            hits = search_reviews(
+                self._conn,
+                self._embedder,
+                question,
+                top_k=5,
+                listing_ids=listing_ids or None,
+            )
             if hits:
+                scope = " (scoped to the listings above)" if listing_ids else ""
                 blocks.append(
-                    "Guest reviews:\n" + "\n".join(f"- {redact(hit['content'])}" for hit in hits)
+                    f"Guest reviews{scope}:\n"
+                    + "\n".join(f"- {redact(hit['content'])}" for hit in hits)
                 )
 
         if any(match["id"] == "policy_kb" for match in matches):
@@ -135,7 +161,7 @@ class ResearchAgent:
 
         return "\n\n".join(blocks) or "No evidence retrieved.", sql
 
-    def _sql_block(self, question: str, history_text: str) -> str:
+    def _sql_block(self, question: str, history_text: str) -> tuple[str, list[int]]:
         feedback = ""
         for attempt in range(2):
             candidate = generate_sql(self._llm, question, history_text, feedback=feedback)
@@ -147,9 +173,12 @@ class ResearchAgent:
                 feedback = f"Previous attempt failed with: {error}\nPrevious SQL:\n{candidate}"
                 continue
             self._last_sql = validated
-            return f"SQL result:\n{format_rows(columns, rows)}"
+            return (
+                f"SQL result:\n{format_rows(columns, rows)}",
+                extract_listing_ids(columns, rows),
+            )
         self._last_sql = None
-        return "SQL attempt failed after one retry; a reviewer should provide the figure."
+        return "SQL attempt failed after one retry; a reviewer should provide the figure.", []
 
     def _synthesise(self, question: str, evidence: str) -> dict:
         response = self._llm.complete(

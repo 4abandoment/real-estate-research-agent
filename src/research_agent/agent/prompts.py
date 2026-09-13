@@ -30,6 +30,9 @@ Rules:
 - Never run LIKE/ILIKE filters over `reviews.comments`: free-text review questions
   are answered by semantic search, not SQL. Use reviews only for counts or dates
   joined by listing_id.
+- When the question concerns a subset of properties (a price decile, a neighbourhood,
+  worst performers), return the DISTINCT listing_ids of that subset, not their reviews;
+  review text is searched separately against those listings.
 - Keep result sets small; add LIMIT when returning raw rows.
 """
 
