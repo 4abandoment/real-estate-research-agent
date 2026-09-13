@@ -1,0 +1,130 @@
+# Fixed topic taxonomy for guest review enrichment (review_pipeline.py).
+#
+# Each review's stored embedding is compared (cosine, centered on the corpus
+# mean because BGE vectors are anisotropic) against the anchors below; a topic
+# flag is set when any anchor similarity clears `threshold`. Keep anchors
+# concrete and idiomatic to guest reviews. Topic ids map 1:1 to the boolean
+# `topic_*` columns on the reviews table.
+threshold: 0.20
+
+topics:
+  - id: cleanliness
+    label: Cleanliness and condition
+    description: Mentions how clean or dirty the accommodation was, including surfaces, bedding, bathroom, and odors.
+    anchors:
+      - spotlessly clean
+      - was not cleaned properly
+      - dust everywhere
+      - fresh towels and linens
+      - mold in the bathroom
+      - smelled damp
+      - very clean and tidy
+      - hair on the floor
+  - id: noise
+    label: Noise and quietness
+    description: Refers to sound levels from inside or outside the property and whether the stay was peaceful or noisy.
+    anchors:
+      - quiet neighborhood
+      - noisy at night
+      - thin walls
+      - traffic noise from the street
+      - slept very well, no noise
+      - loud neighbors upstairs
+      - constant barking dog
+      - peaceful and quiet
+  - id: location
+    label: Location and neighborhood
+    description: Covers the property's position, proximity to attractions and transport, and the surrounding area.
+    anchors:
+      - great central location
+      - close to the tube station
+      - far from the city center
+      - easy walk to restaurants
+      - not near any shops
+      - perfect location for sightseeing
+      - safe area
+      - located on a quiet street
+  - id: checkin
+    label: Check-in process
+    description: Describes how easy or difficult it was to access the property, including instructions, keys, and timing.
+    anchors:
+      - smooth check-in
+      - easy self check-in
+      - key was not left as promised
+      - arrived late and door was locked
+      - clear check-in instructions
+      - waited outside for an hour
+      - check-in was very simple
+      - host met us at the door
+  - id: host_communication
+    label: Host communication
+    description: Evaluates the host's responsiveness, clarity, friendliness, and helpfulness before or during the stay.
+    anchors:
+      - host responded quickly
+      - replied within minutes
+      - very helpful host
+      - could not reach the host
+      - never answered my messages
+      - friendly welcome from the host
+      - excellent communication throughout
+      - unhelpful host
+  - id: amenities
+    label: Amenities and facilities
+    description: Covers the provided equipment and services such as wifi, kitchen, laundry, air conditioning, and toiletries.
+    anchors:
+      - wifi was fast
+      - air conditioning did not work
+      - fully equipped kitchen
+      - no toilet paper
+      - great having a washing machine
+      - coffee maker provided
+      - wifi kept dropping
+      - dishwasher was broken
+  - id: space_beds
+    label: Space and beds
+    description: Comments on room size, layout, furniture, and the comfort of beds and sleeping arrangements.
+    anchors:
+      - very comfortable bed
+      - mattress was too soft
+      - spacious living room
+      - cramped bedroom
+      - sofa bed was lumpy
+      - plenty of space for two
+      - pillows were too thin
+      - room was bigger than expected
+  - id: safety
+    label: Safety and security
+    description: Refers to the security of the building, neighborhood, locks, lighting, and general feeling of being safe.
+    anchors:
+      - felt very safe in the area
+      - secure building with intercom
+      - front door didn't lock
+      - well-lit street at night
+      - smoke detector missing
+      - safe for solo travelers
+      - broken lock on bedroom
+      - no safe in apartment
+  - id: value
+    label: Value for price
+    description: Judges whether the price paid was fair compared to the quality, size, location, and any extra fees.
+    anchors:
+      - good value for money
+      - not worth the price
+      - expensive for what you get
+      - cheap and comfortable
+      - fair price for location
+      - hidden cleaning fees
+      - overpriced for the size
+      - great deal for London
+  - id: accuracy
+    label: Listing accuracy
+    description: Measures how closely the real property matched the photos, description, and features in the listing.
+    anchors:
+      - exactly as described
+      - looks just like the photos
+      - listing was misleading
+      - description said air conditioning but there was none
+      - bigger than it looked in pictures
+      - not as advertised
+      - accurate description and photos
+      - apartment was very different from the listing

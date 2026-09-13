@@ -14,6 +14,44 @@ WAREHOUSE_TABLES = (
     "policy_documents",
 )
 
+# Review enrichment migrations for databases created before the enrichment
+# columns existed. Applied by apply_schema only when a column is missing, so
+# steady-state startup never takes an ACCESS EXCLUSIVE lock on reviews
+# (fresh databases get these columns in CREATE TABLE above).
+REVIEW_MIGRATIONS = (
+    ("sentiment", "TEXT"),
+    ("sentiment_score", "REAL"),
+    ("pos_score", "REAL"),
+    ("neu_score", "REAL"),
+    ("neg_score", "REAL"),
+    ("language", "TEXT"),
+    ("topic_cleanliness", "BOOLEAN"),
+    ("topic_noise", "BOOLEAN"),
+    ("topic_location", "BOOLEAN"),
+    ("topic_checkin", "BOOLEAN"),
+    ("topic_host_communication", "BOOLEAN"),
+    ("topic_amenities", "BOOLEAN"),
+    ("topic_space_beds", "BOOLEAN"),
+    ("topic_safety", "BOOLEAN"),
+    ("topic_value", "BOOLEAN"),
+    ("topic_accuracy", "BOOLEAN"),
+)
+
+# Fixed topic taxonomy ids (see data/review_topics.yaml); matches the boolean
+# topic_* columns on reviews and the topic_*_pct columns on review_baseline.
+TOPIC_COLUMNS = (
+    "cleanliness",
+    "noise",
+    "location",
+    "checkin",
+    "host_communication",
+    "amenities",
+    "space_beds",
+    "safety",
+    "value",
+    "accuracy",
+)
+
 SCHEMA = """
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -64,10 +102,47 @@ CREATE TABLE IF NOT EXISTS reviews (
     date DATE,
     reviewer_id BIGINT,
     reviewer_name TEXT,
-    comments TEXT
+    comments TEXT,
+    sentiment TEXT,
+    sentiment_score REAL,
+    pos_score REAL,
+    neu_score REAL,
+    neg_score REAL,
+    language TEXT,
+    topic_cleanliness BOOLEAN,
+    topic_noise BOOLEAN,
+    topic_location BOOLEAN,
+    topic_checkin BOOLEAN,
+    topic_host_communication BOOLEAN,
+    topic_amenities BOOLEAN,
+    topic_space_beds BOOLEAN,
+    topic_safety BOOLEAN,
+    topic_value BOOLEAN,
+    topic_accuracy BOOLEAN
 );
 
 CREATE INDEX IF NOT EXISTS reviews_listing_idx ON reviews (listing_id);
+
+-- Portfolio-wide review baseline (single row), built by review_pipeline.py so
+-- cohort stats can be reported relative to average without rescanning 2M rows.
+CREATE TABLE IF NOT EXISTS review_baseline (
+    id INT PRIMARY KEY CHECK (id = 1),
+    built_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    total_reviews BIGINT NOT NULL,
+    positive_pct REAL,
+    neutral_pct REAL,
+    negative_pct REAL,
+    topic_cleanliness_pct REAL,
+    topic_noise_pct REAL,
+    topic_location_pct REAL,
+    topic_checkin_pct REAL,
+    topic_host_communication_pct REAL,
+    topic_amenities_pct REAL,
+    topic_space_beds_pct REAL,
+    topic_safety_pct REAL,
+    topic_value_pct REAL,
+    topic_accuracy_pct REAL
+);
 
 CREATE TABLE IF NOT EXISTS land_registry (
     transaction_id TEXT PRIMARY KEY,
@@ -203,6 +278,18 @@ def connect(database_url: str) -> psycopg.Connection:
 
 def apply_schema(conn: psycopg.Connection) -> None:
     conn.execute(SCHEMA)
+    # Conditional migrations: ALTER TABLE takes an ACCESS EXCLUSIVE lock even
+    # with IF NOT EXISTS, which deadlocks against long-lived readers. Check
+    # first so steady-state startup never takes the lock.
+    existing = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'reviews'"
+        ).fetchall()
+    }
+    for column, ddl in REVIEW_MIGRATIONS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE reviews ADD COLUMN IF NOT EXISTS {ddl}")
 
 
 class ConversationStore:

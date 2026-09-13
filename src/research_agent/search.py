@@ -4,7 +4,7 @@ import sys
 
 from research_agent.agent.sql import strip_limit
 from research_agent.config import load_settings
-from research_agent.db import apply_schema, connect
+from research_agent.db import TOPIC_COLUMNS, apply_schema, connect
 from research_agent.embeddings import Embedder
 
 
@@ -63,6 +63,69 @@ def sample_reviews(
             (listing_ids or [], sample_size),
         ).fetchall()
     return [{"id": row[0], "listing_id": row[1], "date": row[2], "content": row[3]} for row in rows]
+
+
+def cohort_review_stats(conn, *, cohort_sql: str) -> str | None:
+    """Cohort-wide sentiment and topic rates, with the portfolio baseline.
+
+    Runs over every enriched review of the cohort (not the sampled page), so
+    answers can quote real statistics next to the qualitative sample.
+    """
+    embedded = strip_limit(cohort_sql).replace("%", "%%")
+    key = _cohort_key_column(conn, embedded)
+    topic_selects = ", ".join(f"count(*) FILTER (WHERE r.topic_{topic})" for topic in TOPIC_COLUMNS)
+    row = conn.execute(
+        "WITH cohort AS (" + embedded + ") SELECT count(*),"
+        " count(*) FILTER (WHERE r.sentiment IS NOT NULL),"
+        " count(*) FILTER (WHERE r.sentiment = 'positive'),"
+        " count(*) FILTER (WHERE r.sentiment = 'neutral'),"
+        " count(*) FILTER (WHERE r.sentiment = 'negative'), "
+        + topic_selects
+        + " FROM reviews r JOIN cohort c ON c."
+        + key
+        + " = r.listing_id",
+    ).fetchone()
+    total = int(row[0])
+    enriched = int(row[1])
+    if enriched == 0:
+        return None
+    positive, neutral, negative = int(row[2]), int(row[3]), int(row[4])
+    topic_counts = {topic: int(row[5 + index]) for index, topic in enumerate(TOPIC_COLUMNS)}
+    baseline = conn.execute(
+        "SELECT total_reviews, positive_pct, neutral_pct, negative_pct, "
+        + ", ".join(f"topic_{topic}_pct" for topic in TOPIC_COLUMNS)
+        + " FROM review_baseline WHERE id = 1"
+    ).fetchone()
+
+    def share(count: int) -> float:
+        return 100.0 * count / enriched
+
+    lines = ["Cohort review statistics (SQL over every enriched review in the cohort):"]
+    if enriched < total:
+        lines.append(
+            f"- reviews in cohort: {enriched:,} scoreable of {total:,} total"
+            " (non-English reviews excluded)"
+        )
+    else:
+        lines.append(f"- reviews in cohort: {enriched:,}")
+    if baseline is not None and baseline[0]:
+        lines.append(
+            f"- sentiment: {share(positive):.0f}% positive / {share(neutral):.0f}% neutral"
+            f" / {share(negative):.0f}% negative (portfolio average: {baseline[1]:.0f}% /"
+            f" {baseline[2]:.0f}% / {baseline[3]:.0f}%)"
+        )
+        rates = ", ".join(
+            f"{topic} {share(topic_counts[topic]):.0f}% (portfolio {baseline[4 + index]:.0f}%)"
+            for index, topic in enumerate(TOPIC_COLUMNS)
+        )
+    else:
+        lines.append(
+            f"- sentiment: {share(positive):.0f}% positive / {share(neutral):.0f}% neutral"
+            f" / {share(negative):.0f}% negative"
+        )
+        rates = ", ".join(f"{topic} {share(topic_counts[topic]):.0f}%" for topic in TOPIC_COLUMNS)
+    lines.append("- topic rates: " + rates)
+    return "\n".join(lines)
 
 
 def search_reviews(
