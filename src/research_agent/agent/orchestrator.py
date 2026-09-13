@@ -40,6 +40,7 @@ class AgentResult:
     sources: list[str] = field(default_factory=list)
     needs_human: bool = False
     escalation_reason: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
 
 def extract_listing_ids(columns: list[str], rows: list[tuple], cap: int = 200) -> list[int]:
@@ -80,6 +81,7 @@ class ResearchAgent:
         self._sql_max_tokens = sql_max_tokens
         self._synth_max_tokens = synth_max_tokens
         self._last_sql: str | None = None
+        self._warnings: list[str] = []
 
     def handle(
         self,
@@ -94,6 +96,7 @@ class ResearchAgent:
             if progress is not None:
                 progress(stage)
 
+        self._warnings = []
         safe_question = redact(question)
         safe_directive = redact(directive) if directive else None
         history = self._conversation.history(channel_id=channel_id, thread_ts=thread_ts, limit=10)
@@ -152,6 +155,7 @@ class ResearchAgent:
             sources=source_ids,
             needs_human=decision["needs_human"],
             escalation_reason=decision["reason"] or None,
+            warnings=list(self._warnings),
         )
 
     def _scope(self, question: str, history_text: str, clarified: bool = False) -> dict:
@@ -184,7 +188,8 @@ class ResearchAgent:
         listing_ids: list[int] = []
 
         if any(match["id"] in SQL_SOURCES for match in matches):
-            tell("Querying the warehouse")
+            primary = next(match for match in matches if match["id"] in SQL_SOURCES)
+            tell(f"Checking {primary['name']}")
             block, listing_ids = self._sql_block(question, history_text)
             blocks.append(block)
             sql = self._last_sql
@@ -215,6 +220,7 @@ class ResearchAgent:
                     )
                 except (psycopg.Error, ValueError) as error:
                     logger.warning("cohort review sampling failed: %s", error)
+                    self._warnings.append("some guest reviews could not be sampled")
                 if sampled:
                     scope_note = "drawn from the full cohort matched by the SQL query"
             if not sampled and listing_ids:
@@ -252,6 +258,8 @@ class ResearchAgent:
                     )
 
         if any(match["id"] == "policy_kb" for match in matches):
+            source = next(match for match in matches if match["id"] == "policy_kb")
+            tell(f"Checking {source['name']}")
             hits = search_policy(self._conn, self._embedder, question, top_k=5)
             if hits:
                 blocks.append(
@@ -263,6 +271,8 @@ class ResearchAgent:
                 )
 
         if any(match["id"] == "data_dictionary" for match in matches):
+            source = next(match for match in matches if match["id"] == "data_dictionary")
+            tell(f"Checking {source['name']}")
             blocks.append(self._data_dictionary_block())
 
         return "\n\n".join(blocks) or "No evidence retrieved.", sql
@@ -302,6 +312,7 @@ class ResearchAgent:
                 extract_listing_ids(columns, rows),
             )
         self._last_sql = None
+        self._warnings.append("could not run a database query; answer may be incomplete")
         return "SQL attempt failed after one retry; a reviewer should provide the figure.", []
 
     def _synthesise(self, question: str, evidence: str, directive: str | None = None) -> dict:

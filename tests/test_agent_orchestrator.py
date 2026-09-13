@@ -222,8 +222,8 @@ def test_review_sampling_uses_full_cohort_sql(monkeypatch) -> None:
         orchestrator,
         "route_question",
         lambda conn, embedder, question, top_k=3: [
-            {"id": "transactions_ledger"},
-            {"id": "guest_reviews"},
+            {"id": "transactions_ledger", "name": "Finance transaction ledger"},
+            {"id": "guest_reviews", "name": "Guest review text"},
         ],
     )
 
