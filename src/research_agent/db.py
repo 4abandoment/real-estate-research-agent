@@ -156,9 +156,12 @@ CREATE TABLE IF NOT EXISTS pending_approvals (
     question TEXT NOT NULL,
     reason TEXT NOT NULL,
     admin_thread_ts TEXT,
+    turns INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE pending_approvals ADD COLUMN IF NOT EXISTS turns INTEGER NOT NULL DEFAULT 0;
 
 CREATE OR REPLACE VIEW neighbourhood_market AS
 SELECT n.listing_neighbourhood AS neighbourhood,
@@ -265,21 +268,45 @@ def create_approval(
     )
 
 
-def find_approval(conn: psycopg.Connection, *, admin_thread_ts: str) -> dict | None:
+def find_approval(
+    conn: psycopg.Connection,
+    *,
+    channel_id: str,
+    thread_ts: str,
+    admin_channel_id: str,
+) -> dict | None:
+    """Match a reply posted either in the admin escalation thread or the origin thread."""
     row = conn.execute(
-        "SELECT origin_channel_id, origin_thread_ts, question FROM pending_approvals"
-        " WHERE admin_thread_ts = %s AND status = 'pending'"
+        "SELECT id, origin_channel_id, origin_thread_ts, question, turns"
+        " FROM pending_approvals"
+        " WHERE status = 'pending' AND ("
+        "  (%s = %s AND admin_thread_ts = %s)"
+        "  OR (origin_channel_id = %s AND origin_thread_ts = %s))"
         " ORDER BY created_at DESC LIMIT 1",
-        (admin_thread_ts,),
+        (channel_id, admin_channel_id, thread_ts, channel_id, thread_ts),
     ).fetchone()
     if row is None:
         return None
-    return {"origin_channel_id": row[0], "origin_thread_ts": row[1], "question": row[2]}
+    return {
+        "id": row[0],
+        "origin_channel_id": row[1],
+        "origin_thread_ts": row[2],
+        "question": row[3],
+        "turns": row[4],
+    }
 
 
-def resolve_approval(conn: psycopg.Connection, *, admin_thread_ts: str, guidance: str) -> None:
+def bump_approval_turns(conn: psycopg.Connection, *, approval_id: int) -> int:
+    row = conn.execute(
+        "UPDATE pending_approvals SET turns = turns + 1 WHERE id = %s RETURNING turns",
+        (approval_id,),
+    ).fetchone()
+    return row[0]
+
+
+def resolve_approval(conn: psycopg.Connection, *, approval_id: int, guidance: str) -> None:
     conn.execute(
         "UPDATE pending_approvals SET status = 'resolved', reason = %s"
-        " WHERE admin_thread_ts = %s AND status = 'pending'",
-        (guidance, admin_thread_ts),
+        " WHERE id = %s AND status = 'pending'",
+        (guidance, approval_id),
     )
