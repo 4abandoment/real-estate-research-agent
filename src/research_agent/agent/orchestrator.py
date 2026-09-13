@@ -89,7 +89,12 @@ class ResearchAgent:
             f"{message.role}: {redact(message.content)}" for message in history
         )
 
-        scope = self._scope(safe_question, history_text, clarified=len(history) >= 8)
+        scope = self._scope(
+            safe_question,
+            history_text,
+            # Once a reviewer has directed the agent, stop clarifying: act on it.
+            clarified=len(history) >= 8 or any(m.role == "system" for m in history),
+        )
         if scope["needs_clarification"]:
             answer = "Before I dig in:\n" + "\n".join(f"- {item}" for item in scope["questions"])
             record_query(
