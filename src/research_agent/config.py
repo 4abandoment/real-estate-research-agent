@@ -1,7 +1,9 @@
 """Application settings loaded from the environment.
 
-Secrets live in `.env` (gitignored). Real OS environment variables win, so the
-same code works locally and in the cloud.
+Secrets live in `.env` (gitignored) and that file is the source of truth
+locally; `override=True` stops stale OS environment variables shadowing it
+(which silently pinned an old API key once). In the cloud there is no `.env`,
+so real environment variables are used unchanged.
 """
 
 import os
@@ -9,7 +11,7 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-load_dotenv(override=False)
+load_dotenv(override=True)
 
 
 def _text(name: str) -> str | None:
