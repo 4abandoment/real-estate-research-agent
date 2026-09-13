@@ -27,3 +27,34 @@ def test_blank_values_become_none(monkeypatch) -> None:
     settings = load_settings()
 
     assert settings.anthropic_api_key is None
+
+
+def test_token_caps_have_defaults(monkeypatch) -> None:
+    for name in ("SCOPE_MAX_TOKENS", "SQL_MAX_TOKENS", "SYNTH_MAX_TOKENS"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = load_settings()
+
+    assert settings.scope_max_tokens == 500
+    assert settings.sql_max_tokens == 3000
+    assert settings.synth_max_tokens == 3000
+
+
+def test_token_caps_read_from_environment(monkeypatch) -> None:
+    monkeypatch.setenv("SCOPE_MAX_TOKENS", "400")
+    monkeypatch.setenv("SQL_MAX_TOKENS", "4096")
+    monkeypatch.setenv("SYNTH_MAX_TOKENS", "2048")
+
+    settings = load_settings()
+
+    assert settings.scope_max_tokens == 400
+    assert settings.sql_max_tokens == 4096
+    assert settings.synth_max_tokens == 2048
+
+
+def test_invalid_token_cap_falls_back_to_default(monkeypatch) -> None:
+    monkeypatch.setenv("SQL_MAX_TOKENS", "not-a-number")
+
+    settings = load_settings()
+
+    assert settings.sql_max_tokens == 3000
