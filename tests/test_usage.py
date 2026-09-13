@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from research_agent.llm.client import LLMResponse
-from research_agent.llm.usage import estimate_cost, log_usage, track_usage
+from research_agent.llm.usage import estimate_cost, log_usage, track_usage, usage_totals
 
 
 def _response() -> LLMResponse:
@@ -43,3 +45,14 @@ def test_track_usage_decorator_logs(tmp_path, monkeypatch) -> None:
 
     assert log_file.exists()
     assert json.loads(log_file.read_text(encoding="utf-8").strip())["task"] == "synthesize"
+
+
+def test_usage_totals(tmp_path) -> None:
+    log_file = tmp_path / "usage.jsonl"
+    log_file.write_text('{"cost_usd": 0.1}\n{"cost_usd": 0.2}\n\n', encoding="utf-8")
+
+    calls, cost = usage_totals(log_file)
+
+    assert calls == 2
+    assert cost == pytest.approx(0.3)
+    assert usage_totals(tmp_path / "missing.jsonl") == (0, 0.0)

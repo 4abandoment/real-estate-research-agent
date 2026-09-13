@@ -3,6 +3,7 @@
 import functools
 import json
 import time
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -66,3 +67,42 @@ def track_usage(task: str) -> Callable[[Callable[..., T]], Callable[..., T]]:
         return wrapper
 
     return decorator
+
+
+def usage_totals(path: Path) -> tuple[int, float]:
+    """Total calls and total estimated cost from a usage log."""
+    if not path.exists():
+        return 0, 0.0
+    calls, cost = 0, 0.0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        entry = json.loads(line)
+        calls += 1
+        cost += entry["cost_usd"]
+    return calls, cost
+
+
+def usage_summary(path: Path) -> str:
+    """Markdown cost summary per model from a usage log."""
+    if not path.exists():
+        return f"No usage log at {path}"
+    totals: dict[str, list[float]] = defaultdict(lambda: [0, 0, 0.0, 0])
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        entry = json.loads(line)
+        row = totals[entry["model"]]
+        row[0] += entry["input_tokens"]
+        row[1] += entry["output_tokens"]
+        row[2] += entry["cost_usd"]
+        row[3] += 1
+
+    lines = ["| model | calls | input | output | cost (USD) |", "|---|---:|---:|---:|---:|"]
+    for model, (input_tokens, output_tokens, cost, calls) in sorted(totals.items()):
+        lines.append(
+            f"| {model} | {calls} | {int(input_tokens)} | {int(output_tokens)} | {cost:.4f} |"
+        )
+    total_cost = sum(row[2] for row in totals.values())
+    lines.append(f"\n**Total: ${total_cost:.4f}**")
+    return "\n".join(lines)

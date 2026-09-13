@@ -15,6 +15,12 @@
         "description": "Show the last SQL query the agent ran",
         "usage_hint": "[optional]",
         "should_escape": false
+      },
+      {
+        "command": "/status",
+        "description": "Agent status: data loaded, recent queries, cost",
+        "usage_hint": "",
+        "should_escape": false
       }
     ]
   },
