@@ -1,9 +1,18 @@
 id: guest_reviews
 name: Guest review text
 description: >
-  Free-text guest reviews for each property. Use for qualitative questions
-  about guest sentiment, complaints, maintenance issues, cleanliness, host
-  behaviour and recurring themes that are not captured by numeric fields.
+  Free-text guest reviews for each property, enriched with a lexicon sentiment
+  label (sentiment: positive/neutral/negative, plus sentiment_score and
+  pos/neu/neg proportions) and boolean topic flags: topic_cleanliness,
+  topic_noise, topic_location, topic_checkin, topic_host_communication,
+  topic_amenities, topic_space_beds, topic_safety, topic_value, topic_accuracy.
+  A TRUE topic flag means the review mentions that theme, not necessarily a
+  complaint. review_baseline holds portfolio-wide rates so cohort results can be
+  framed relative to average. Use for qualitative questions about guest
+  sentiment, complaints, maintenance issues, cleanliness, host behaviour and
+  recurring themes, and for statistics over the sentiment/topic flags. Free text
+  itself is read via semantic sampling, not SQL.
 retrieval: semantic
 tables:
   - reviews
+  - review_baseline

@@ -19,6 +19,7 @@ dependencies = [
     "fastembed>=0.3",
     "flask>=3.0",
     "psutil>=6.0",
+    "vaderSentiment>=3.3",
 ]
 
 [project.optional-dependencies]

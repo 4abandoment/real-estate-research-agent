@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from research_agent.agent.orchestrator import extract_listing_ids
-from research_agent.search import sample_reviews
+from research_agent.search import cohort_review_stats, sample_reviews
 
 
 class _FakeCursor:
@@ -13,6 +13,9 @@ class _FakeCursor:
 
     def fetchall(self):
         return self._rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
 
 
 class _FakeConn:
@@ -91,3 +94,39 @@ def test_listing_id_sampling_passes_ids_as_params() -> None:
     query, params = conn.queries[-1]
     assert "ANY(%s)" in query
     assert params == ([1, 2, 3], 30)
+
+
+class _StatsConn:
+    def __init__(self, stats_row, baseline_row):
+        self._stats_row = stats_row
+        self._baseline_row = baseline_row
+        self.queries = []
+
+    def execute(self, query, params=None):
+        self.queries.append(query)
+        if "LIMIT 0" in query:
+            return _FakeCursor([], [SimpleNamespace(name="listing_id")])
+        if "review_baseline" in query:
+            return _FakeCursor([self._baseline_row] if self._baseline_row else [])
+        return _FakeCursor([self._stats_row] if self._stats_row else [])
+
+
+def test_cohort_review_stats_formats_baseline_comparison() -> None:
+    stats_row = (1000, 800, 600, 150, 50, 100, 80, 70, 60, 50, 40, 30, 20, 10, 5)
+    baseline_row = (2237083, 91.0, 6.0, 3.0, *([10.0] * 10))
+    conn = _StatsConn(stats_row, baseline_row)
+
+    text = cohort_review_stats(
+        conn, cohort_sql="SELECT l.id AS listing_id FROM listings l LIMIT 500"
+    )
+
+    assert "800 enriched of 1,000 total" in text
+    assert "75% positive / 19% neutral / 6% negative" in text
+    assert "portfolio average: 91% / 6% / 3%" in text
+    assert "noise 10% (portfolio 10%)" in text
+
+
+def test_cohort_review_stats_returns_none_when_unenriched() -> None:
+    conn = _StatsConn((0, 0, 0, 0, 0, *([0] * 10)), None)
+
+    assert cohort_review_stats(conn, cohort_sql="SELECT 1 AS listing_id") is None

@@ -14,6 +14,21 @@ WAREHOUSE_TABLES = (
     "policy_documents",
 )
 
+# Fixed topic taxonomy ids (see data/review_topics.yaml); matches the boolean
+# topic_* columns on reviews and the topic_*_pct columns on review_baseline.
+TOPIC_COLUMNS = (
+    "cleanliness",
+    "noise",
+    "location",
+    "checkin",
+    "host_communication",
+    "amenities",
+    "space_beds",
+    "safety",
+    "value",
+    "accuracy",
+)
+
 SCHEMA = """
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -64,10 +79,64 @@ CREATE TABLE IF NOT EXISTS reviews (
     date DATE,
     reviewer_id BIGINT,
     reviewer_name TEXT,
-    comments TEXT
+    comments TEXT,
+    sentiment TEXT,
+    sentiment_score REAL,
+    pos_score REAL,
+    neu_score REAL,
+    neg_score REAL,
+    topic_cleanliness BOOLEAN,
+    topic_noise BOOLEAN,
+    topic_location BOOLEAN,
+    topic_checkin BOOLEAN,
+    topic_host_communication BOOLEAN,
+    topic_amenities BOOLEAN,
+    topic_space_beds BOOLEAN,
+    topic_safety BOOLEAN,
+    topic_value BOOLEAN,
+    topic_accuracy BOOLEAN
 );
 
 CREATE INDEX IF NOT EXISTS reviews_listing_idx ON reviews (listing_id);
+
+-- Review enrichment migration (sentiment + topic one-hot flags; see review_pipeline).
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS sentiment TEXT;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS sentiment_score REAL;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS pos_score REAL;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS neu_score REAL;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS neg_score REAL;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_cleanliness BOOLEAN;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_noise BOOLEAN;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_location BOOLEAN;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_checkin BOOLEAN;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_host_communication BOOLEAN;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_amenities BOOLEAN;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_space_beds BOOLEAN;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_safety BOOLEAN;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_value BOOLEAN;
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS topic_accuracy BOOLEAN;
+CREATE INDEX IF NOT EXISTS reviews_sentiment_idx ON reviews (sentiment);
+
+-- Portfolio-wide review baseline (single row), built by review_pipeline.py so
+-- cohort stats can be reported relative to average without rescanning 2M rows.
+CREATE TABLE IF NOT EXISTS review_baseline (
+    id INT PRIMARY KEY CHECK (id = 1),
+    built_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    total_reviews BIGINT NOT NULL,
+    positive_pct REAL,
+    neutral_pct REAL,
+    negative_pct REAL,
+    topic_cleanliness_pct REAL,
+    topic_noise_pct REAL,
+    topic_location_pct REAL,
+    topic_checkin_pct REAL,
+    topic_host_communication_pct REAL,
+    topic_amenities_pct REAL,
+    topic_space_beds_pct REAL,
+    topic_safety_pct REAL,
+    topic_value_pct REAL,
+    topic_accuracy_pct REAL
+);
 
 CREATE TABLE IF NOT EXISTS land_registry (
     transaction_id TEXT PRIMARY KEY,

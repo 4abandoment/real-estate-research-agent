@@ -21,7 +21,12 @@ from research_agent.embeddings import Embedder
 from research_agent.llm.client import LLMClient
 from research_agent.llm.model_router import model_for
 from research_agent.safety.pii import redact
-from research_agent.search import sample_reviews, search_policy, search_reviews
+from research_agent.search import (
+    cohort_review_stats,
+    sample_reviews,
+    search_policy,
+    search_reviews,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +194,15 @@ class ResearchAgent:
             sampled: list[dict] = []
             scope_note = ""
             if sql:
+                # Cohort-wide sentiment/topic stats from the warehouse, so the
+                # sample supplies colour and SQL supplies the aggregate numbers.
+                try:
+                    stats = cohort_review_stats(self._conn, cohort_sql=sql)
+                except (psycopg.Error, ValueError) as error:
+                    logger.warning("cohort review stats failed: %s", error)
+                    stats = None
+                if stats:
+                    blocks.append(stats)
                 # Full cohort: the display LIMIT is stripped inside
                 # sample_reviews, so the draw spans every listing the cohort
                 # query matches, not just the fetched page.

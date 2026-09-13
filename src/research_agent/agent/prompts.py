@@ -8,7 +8,12 @@ listings(id, name, host_name, neighbourhood, room_type, latitude, longitude,
          availability_365)
 calendar(listing_id, date, available boolean, price_gbp, adjusted_price_gbp,
          minimum_nights, maximum_nights)
-reviews(id, listing_id, date, reviewer_name, comments)
+reviews(id, listing_id, date, reviewer_name, comments, sentiment, sentiment_score,
+         pos_score, neu_score, neg_score, topic_cleanliness, topic_noise,
+         topic_location, topic_checkin, topic_host_communication, topic_amenities,
+         topic_space_beds, topic_safety, topic_value, topic_accuracy)
+review_baseline(id=1, total_reviews, positive_pct, neutral_pct, negative_pct,
+         topic_*_pct  -- portfolio-wide average rates for relative comparison)
 transactions(id, listing_id, period date,
          type in ('invoice','fee','tax','payment','refund','chargeback'),
          amount_gbp, status, due_date, created_at, reference)
@@ -28,6 +33,14 @@ Data notes:
   transactions. land_registry has no listing link: reach it via
   neighbourhood_market (neighbourhood/district). There is no person- or
   tenant-level data: balances are per listing, hosts only via listings.
+- Review enrichment: sentiment in ('positive','neutral','negative') comes from a
+  lexicon classifier, with sentiment_score (compound, -1..1) and pos/neu/neg
+  proportions. topic_* booleans mark whether a review mentions that theme
+  (a mention, not necessarily a complaint). NULL means not yet enriched; treat
+  as FALSE. Cohort-wide sentiment/topic statistics are computed automatically
+  from the cohort query, so do not aggregate them yourself.
+- review_baseline holds one row of portfolio-wide sentiment shares and topic
+  rates for framing cohort results relative to average.
 """
 
 SQL_SYSTEM = f"""You are a careful PostgreSQL analyst for a real-estate finance team.
@@ -40,8 +53,8 @@ Rules:
 - Use explicit column lists and clear aliases. Aggregate when the question asks for totals.
 - `calendar.available = false` means a night is booked.
 - Never run LIKE/ILIKE filters over `reviews.comments`: free-text review questions
-  are answered by semantic search, not SQL. Use reviews only for counts or dates
-  joined by listing_id.
+  are answered by semantic search, not SQL. Use reviews for counts, dates,
+  sentiment labels and topic flags (joined by listing_id), or not at all.
 - Never select `reviewer_name` or `host_name`: personal names are not available;
   refer to reviewers and hosts generically.
 - When the question concerns a subset of properties (a price decile, a neighbourhood,
@@ -73,8 +86,12 @@ Examples (question -> needs_clarification, questions):
 SYNTH_SYSTEM = """You answer real-estate questions using ONLY the supplied evidence,
 writing like a careful analyst. Cite the source of each claim (a table name or URL).
 
-Structure the ANSWER as an analyst note:
+Structure the ANSWER as a tight analyst note:
 - First line: the headline finding with the key figure.
+- If the evidence includes cohort review statistics, follow with one "Vibe:" line
+  summarising the qualitative pattern, then 2-4 compact stat bullets using the
+  supplied numbers. Phrase cohort rates relative to the portfolio average where
+  both are given (e.g. "noise mentioned in 24% of cohort reviews vs 11% portfolio-wide").
 - BASIS: one line stating the cohort definition (including any cutoff), how many
   items were analysed out of how many, and how they were selected (random sample
   vs illustrative excerpts).
