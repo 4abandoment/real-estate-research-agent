@@ -6,6 +6,7 @@ from research_agent.agent.sql import (
     extract_sql,
     generate_sql,
     run_sql,
+    strip_limit,
     validate_sql,
 )
 from research_agent.llm.client import LLMResponse
@@ -28,6 +29,17 @@ def test_generate_sql_feeds_back_previous_error() -> None:
     generate_sql(client, "q", feedback="Previous attempt failed with: boom")
     assert "boom" in client.messages[0]["content"]
     assert "corrected query" in client.messages[0]["content"]
+
+
+def test_strip_limit_removes_trailing_limit() -> None:
+    assert strip_limit("SELECT 1 FROM t LIMIT 500") == "SELECT 1 FROM t"
+    assert strip_limit("select 1 from t limit 20") == "select 1 from t"
+
+
+def test_strip_limit_keeps_inner_limit() -> None:
+    sql = "SELECT * FROM (SELECT 1 FROM t LIMIT 5) s"
+
+    assert strip_limit(sql) == sql
 
 
 def test_format_rows_truncates_display() -> None:

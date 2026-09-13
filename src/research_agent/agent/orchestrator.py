@@ -186,8 +186,26 @@ class ResearchAgent:
 
         if any(match["id"] == "guest_reviews" for match in matches):
             tell("Sampling guest reviews")
-            if listing_ids:
-                # Measurement base: unbiased random sample of the scoped cohort.
+            sampled: list[dict] = []
+            scope_note = ""
+            if sql:
+                # Full cohort: the display LIMIT is stripped inside
+                # sample_reviews, so the draw spans every listing the cohort
+                # query matches, not just the fetched page.
+                try:
+                    sampled = sample_reviews(
+                        self._conn,
+                        cohort_sql=sql,
+                        sample_size=self._sample_size,
+                        seed=self._sample_seed,
+                    )
+                except psycopg.Error as error:
+                    logger.warning("cohort review sampling failed: %s", error)
+                if sampled:
+                    scope_note = "drawn from the full cohort matched by the SQL query"
+            if not sampled and listing_ids:
+                # Fallback: the fetched page's ids are still an unbiased base
+                # for the cohort that page represents.
                 sampled = sample_reviews(
                     self._conn,
                     listing_ids=listing_ids,
@@ -195,15 +213,16 @@ class ResearchAgent:
                     seed=self._sample_seed,
                 )
                 if sampled:
-                    blocks.append(
-                        f"Random sample of {len(sampled)} reviews from the"
-                        f" {len(listing_ids)} scoped listings (measurement base):\n"
-                        + "\n".join(
-                            f"- #{item['id']} (listing {item['listing_id']},"
-                            f" {item['date']}): {redact(item['content'])}"
-                            for item in sampled
-                        )
+                    scope_note = f"from the {len(listing_ids)} scoped listings (fetched page)"
+            if sampled:
+                blocks.append(
+                    f"Random sample of {len(sampled)} reviews {scope_note} (measurement base):\n"
+                    + "\n".join(
+                        f"- #{item['id']} (listing {item['listing_id']},"
+                        f" {item['date']}): {redact(item['content'])}"
+                        for item in sampled
                     )
+                )
             else:
                 # Illustration only: most-similar excerpts, not a random sample.
                 hits = search_reviews(self._conn, self._embedder, question, top_k=5)
