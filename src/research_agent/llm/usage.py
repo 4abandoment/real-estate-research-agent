@@ -22,6 +22,8 @@ PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "openrouter/deepseek/deepseek-v4.1-flash": (0.15, 0.60),
     "openrouter/deepseek/deepseek-v4-flash": (0.05, 0.10),
     "openrouter/deepseek/deepseek-v4-pro": (1.60, 3.20),
+    "openrouter/google/gemini-3.7-flash": (0.75, 3.75),
+    "openrouter/google/gemini-3.8-flash": (0.75, 3.75),
     "openrouter/google/gemini-2.5-flash": (0.30, 2.50),
 }
 
