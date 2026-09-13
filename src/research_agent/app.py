@@ -13,6 +13,7 @@ gets a :eyes: reaction while working and :white_check_mark: when done.
 """
 
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -39,8 +40,10 @@ from research_agent.llm.usage import usage_totals
 logger = logging.getLogger(__name__)
 
 FALLBACK = "Research agent online. Ask me about the portfolio."
+FAILED = "Something went wrong handling that - please try again."
 MAX_REVIEW_TURNS = 4
 MIN_FOLLOWUP_CHARS = 12
+SQL_FOLLOWUP = re.compile(r"\bsql\b", re.IGNORECASE)
 
 # ponytail: single-process bot, so in-memory in-flight tracking is enough.
 _ACTIVE: dict[str, dict] = {}
@@ -134,7 +137,7 @@ def build_app(
         )
 
     @app.command("/sql")
-    def show_sql(ack, command, respond) -> None:
+    def show_sql(ack, command, respond, client) -> None:
         ack()
         if conn is None:
             respond("SQL log unavailable.")
@@ -143,7 +146,18 @@ def build_app(
         if not record or not record["sql"]:
             respond("No SQL has been run in this channel yet.")
             return
-        respond(f"Last question: {record['question']}\n```{record['sql']}```")
+        text = f"Last question: {record['question']}\n```{record['sql']}```"
+        # Reply in the thread the query ran in; slash-command responds land
+        # unthreaded in the channel root and are easy to miss.
+        if record.get("thread_ts"):
+            try:
+                client.chat_postMessage(
+                    channel=command.get("channel_id"), thread_ts=record["thread_ts"], text=text
+                )
+                return
+            except Exception as error:  # noqa: BLE001 - fall back to an ephemeral reply
+                logger.warning("threaded /sql reply failed: %s", error)
+        respond(text)
 
     @app.command("/progress")
     def show_progress(ack, command, respond) -> None:
@@ -227,6 +241,21 @@ def _respond(
             user_id=user_id,
         )
 
+    # "Show me the SQL" follow-ups answer straight from the query log.
+    if conn is not None and SQL_FOLLOWUP.search(question):
+        record = last_query(conn, channel_id=channel_id, thread_ts=thread_ts)
+        if record is not None:
+            if record["sql"]:
+                reply = f"Last question: {record['question']}\n```{record['sql']}```"
+            else:
+                reply = "No SQL was generated for the last question in this thread."
+            _post(client, channel_id, thread_ts, reply)
+            if store is not None:
+                store.add(
+                    channel_id=channel_id, thread_ts=thread_ts, role="assistant", content=reply
+                )
+            return
+
     if agent is None or conn is None:
         _post(client, channel_id, thread_ts, FALLBACK)
         return
@@ -247,8 +276,16 @@ def _respond(
         result = agent.handle(
             question=question, channel_id=channel_id, thread_ts=thread_ts, progress=progress
         )
-    finally:
+    except Exception as error:  # noqa: BLE001 - surface failures instead of silent threads
+        logger.exception("agent run failed: %s", error)
         _clear_active(channel_id)
+        try:
+            client.chat_update(channel=channel_id, ts=placeholder["ts"], text=FAILED)
+        except Exception as update_error:  # noqa: BLE001 - best-effort failure notice
+            logger.warning("failure notice failed: %s", update_error)
+        _unreact(client, channel_id, message_ts, "eyes")
+        return
+    _clear_active(channel_id)
 
     if result.needs_human and settings.slack_admin_channel_id:
         _escalate(settings, conn, client, channel_id, thread_ts, question, result)
@@ -335,8 +372,12 @@ def _handle_admin_reply(
             progress=progress,
             directive=text,
         )
-    finally:
+    except Exception as error:  # noqa: BLE001 - surface failures instead of silent threads
+        logger.exception("directed re-run failed: %s", error)
         _clear_active(origin_channel)
+        client.chat_update(channel=origin_channel, ts=placeholder["ts"], text=FAILED)
+        return
+    _clear_active(origin_channel)
     reply = _format_reply(result) + "\n_(under reviewer direction)_"
 
     client.chat_update(channel=origin_channel, ts=placeholder["ts"], text=reply)
