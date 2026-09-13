@@ -199,7 +199,7 @@ class ResearchAgent:
                         sample_size=self._sample_size,
                         seed=self._sample_seed,
                     )
-                except psycopg.Error as error:
+                except (psycopg.Error, ValueError) as error:
                     logger.warning("cohort review sampling failed: %s", error)
                 if sampled:
                     scope_note = "drawn from the full cohort matched by the SQL query"

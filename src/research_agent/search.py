@@ -12,6 +12,17 @@ def _query_vector(embedder: Embedder, query: str) -> str:
     return Embedder.to_pgvector(embedder.embed([query])[0])
 
 
+def _cohort_key_column(conn, embedded_cohort: str) -> str:
+    """Name of the cohort's listing-id column (generated SQL aliases it inconsistently)."""
+    cursor = conn.execute(f"WITH cohort AS ({embedded_cohort}) SELECT * FROM cohort LIMIT 0")
+    names = [column.name.lower() for column in (cursor.description or [])]
+    if "listing_id" in names:
+        return "listing_id"
+    if "id" in names:
+        return "id"
+    raise ValueError(f"cohort query exposes no listing id column: {names}")
+
+
 def sample_reviews(
     conn,
     *,
@@ -34,11 +45,14 @@ def sample_reviews(
         # Literal % in the cohort SQL (e.g. ILIKE '%Soho%') must survive
         # psycopg's placeholder parsing of the combined query.
         embedded = strip_limit(cohort_sql).replace("%", "%%")
+        key = _cohort_key_column(conn, embedded)
         rows = conn.execute(
             "WITH cohort AS ("
             + embedded
             + ") SELECT r.id, r.listing_id, r.date, r.comments FROM reviews r"
-            " JOIN cohort c ON c.listing_id = r.listing_id"
+            " JOIN cohort c ON c."
+            + key
+            + " = r.listing_id"
             " WHERE r.comments IS NOT NULL"
             " ORDER BY random() LIMIT %s",
             (sample_size,),
