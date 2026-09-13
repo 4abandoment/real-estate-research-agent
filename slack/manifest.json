@@ -17,9 +17,8 @@
         "should_escape": false
       },
       {
-        "command": "/status",
-        "description": "Agent status: data loaded, recent queries, cost",
-        "usage_hint": "",
+        "command": "/progress",
+        "description": "Agent progress: in-flight work, data loaded, recent queries, cost",
         "should_escape": false
       }
     ]

@@ -145,8 +145,8 @@ def build_app(
             return
         respond(f"Last question: {record['question']}\n```{record['sql']}```")
 
-    @app.command("/status")
-    def show_status(ack, command, respond) -> None:
+    @app.command("/progress")
+    def show_progress(ack, command, respond) -> None:
         ack()
         if conn is None:
             respond("Status unavailable (no database connection).")
