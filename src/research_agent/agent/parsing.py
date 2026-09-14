@@ -15,11 +15,17 @@ def parse_scope(text: str) -> dict:
     try:
         data = load_json(text)
     except (ValueError, json.JSONDecodeError):
-        return {"needs_clarification": False, "questions": []}
+        return {"needs_clarification": False, "questions": [], "confidence": 1.0, "assumption": ""}
     questions = [str(item) for item in data.get("questions", []) if str(item).strip()]
+    try:
+        confidence = min(max(float(data.get("confidence", 1.0)), 0.0), 1.0)
+    except (TypeError, ValueError):
+        confidence = 1.0
     return {
         "needs_clarification": bool(data.get("needs_clarification")) and bool(questions),
-        "questions": questions[:2],
+        "questions": questions[:3],
+        "confidence": confidence,
+        "assumption": str(data.get("assumption", "")).strip(),
     }
 
 

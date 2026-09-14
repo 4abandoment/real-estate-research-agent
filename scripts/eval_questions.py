@@ -59,7 +59,34 @@ QUESTIONS = [
         " total overdue invoice balances?",
         [r"basis", r"random sample", r"#\d+|listing \d+"],
     ),
+    (
+        "in_trouble",
+        "Which of our listings are in trouble?",
+        # Ambiguity must be surfaced: either a clarifying question or a stated
+        # assumption - never a silent interpretation.
+        [r"before i dig in|assum"],
+    ),
 ]
+
+# Questions that must NOT clarify (scope sensitivity guard: no over-clarifying
+# of well-posed questions).
+SCOPE_FORBIDDEN = {
+    "overdue": [r"^before i dig in"],
+    "deposit": [r"^before i dig in"],
+    "data_dictionary": [r"^before i dig in"],
+}
+
+# Scripted user replies for questions whose first turn is a clarification;
+# the rubric runs against the final answer after the canned replies.
+QUESTION_SCRIPTS = {
+    "top_decile": [
+        "Most expensive by nightly listing price; common issues = the most"
+        " frequently flagged review topics."
+    ],
+    "soho_negative": [
+        "All listings in Soho; show a sample of negative reviews with their review ids."
+    ],
+}
 
 FORBIDDEN = [r"could not parse"]
 
@@ -79,11 +106,12 @@ def main() -> None:
 
     conn = connect(settings.database_url)
     apply_schema(conn)
+    conversation = ConversationStore(conn)
     agent = ResearchAgent(
         llm=create_client(settings),
         conn=conn,
         embedder=Embedder(),
-        conversation=ConversationStore(conn),
+        conversation=conversation,
         sample_seed=SEED,
         scope_max_tokens=settings.scope_max_tokens,
         sql_max_tokens=settings.sql_max_tokens,
@@ -100,14 +128,34 @@ def main() -> None:
     answers_dir.mkdir(parents=True, exist_ok=True)
 
     for name, question, patterns in QUESTIONS:
+        scripted = QUESTION_SCRIPTS.get(name, [])
         answers = []
         for run in range(runs):
             thread = f"eval-{name}-{run}-{int(time.time())}"
-            result = agent.handle(question=question, channel_id=EVAL_CHANNEL, thread_ts=thread)
-            answers.append(result.answer)
+            pending = question
+            final_answer = None
+            transcript_lines = [f"# {name} (run {run})", "", f"**Q1:** {question}", ""]
+            for turn in range(len(scripted) + 1):
+                conversation.add(
+                    channel_id=EVAL_CHANNEL, thread_ts=thread, role="user", content=pending
+                )
+                result = agent.handle(question=pending, channel_id=EVAL_CHANNEL, thread_ts=thread)
+                conversation.add(
+                    channel_id=EVAL_CHANNEL,
+                    thread_ts=thread,
+                    role="assistant",
+                    content=result.answer,
+                )
+                transcript_lines.append(f"\n**Agent (turn {turn + 1}):**\n{result.answer}")
+                final_answer = result.answer
+                if not result.answer.startswith("Before I dig in"):
+                    break
+                if turn < len(scripted):
+                    pending = scripted[turn]
+                    transcript_lines.append(f"\n**User (scripted reply {turn + 1}):** {pending}")
+            answers.append(final_answer)
             (answers_dir / f"{name}_run{run}.md").write_text(
-                f"# {name} (run {run})\n\n{question}\n\n---\n\n{result.answer}\n",
-                encoding="utf-8",
+                "\n".join(transcript_lines) + "\n", encoding="utf-8"
             )
         for pattern in patterns:
             hits = sum(1 for answer in answers if re.search(pattern, answer, re.IGNORECASE))
@@ -119,6 +167,15 @@ def main() -> None:
             total_checks += runs
             passed_checks += runs - hits
             lines.append(f"| {name} | !/{pattern}/ absent | {runs - hits}/{runs} |")
+        for pattern in SCOPE_FORBIDDEN.get(name, []):
+            hits = sum(
+                1
+                for answer in answers
+                if re.search(pattern, answer.strip(), re.IGNORECASE | re.MULTILINE)
+            )
+            total_checks += runs
+            passed_checks += runs - hits
+            lines.append(f"| {name} | !/{pattern}/ absent (scope) | {runs - hits}/{runs} |")
         print(f"{name}: done ({runs} runs)")
 
     rate = 100 * passed_checks / total_checks if total_checks else 0.0

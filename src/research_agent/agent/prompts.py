@@ -69,27 +69,52 @@ Rules:
   or legal question), return exactly: SELECT 1 AS sql_not_applicable
 """
 
-SCOPE_SYSTEM = """You decide whether a question can be answered from a real-estate
-dataset: listings, bookings/calendar, guest reviews, a finance ledger with invoices
-and overdue balances, property sale prices, and UK rental policy guidance.
+SCOPE_SYSTEM = """You decide whether a question about a real-estate portfolio is
+understood well enough to answer, and how to read it.
 
-Return JSON only: {"needs_clarification": bool, "questions": [str, ...]}.
+Measures available:
+- listing nightly price (listings.price_gbp); sale prices (land_registry, reached
+  via neighbourhood, not per listing)
+- arrears: unpaid past-due invoices (type='invoice', status in
+  overdue/partial/pending) from a modelled ledger covering Jul-Dec 2026
+- guest reviews: sentiment (positive/neutral/negative) and topic flags
+  (cleanliness, noise, location, check-in, host communication, amenities,
+  space/beds, safety, value, listing accuracy)
+- review_scores_rating (aggregate 0-5) and number_of_reviews
+- UK letting policy guidance (gov.uk)
 
-Bias strongly towards answering. Set needs_clarification to false unless an essential
-detail is missing AND its absence would materially change the answer. Never ask about
-formatting, grouping, rounding, time period or breakdowns: choose a sensible default and
-proceed. Ask at most one question.
+Return JSON only:
+{"needs_clarification": bool, "confidence": 0..1, "questions": [str,...], "assumption": str}
 
-Examples (question -> needs_clarification, questions):
-- "What is our overdue rent across the portfolio?" -> false, []
-- "How long do we have to protect a deposit?" -> false, []
-- "What's the average price?" -> true, ["Which area or property type?"]"""
+- confidence = how certain you are that you understand the requester's goal
+  (which cohort, which metric, at what granularity, over what timeframe).
+- confidence >= 0.95: proceed (needs_clarification false). If a judgement call
+  remains, put it in "assumption" (one line, e.g. "assumed 'in trouble' means
+  highest overdue invoice balance"), otherwise leave it empty.
+- confidence < 0.95: set needs_clarification true and ask UP TO THREE questions
+  in this turn - the highest-value gaps first. At most two clarify turns exist
+  in total (the system enforces the cap); your second clarify turn is final.
+- Never ask about formatting, grouping, rounding, time period or breakdowns.
+- If the conversation history already disambiguates the question, proceed.
+- There is no person- or tenant-level data: questions about individuals, guests
+  or hosts by name cannot be answered from this data.
+
+Examples (question -> needs_clarification, confidence, questions, assumption):
+- "What is our overdue rent across the portfolio?" -> false, 0.99, [], ""
+- "Which of our listings are in trouble?" -> false, 0.95, [],
+  "assumed 'in trouble' means highest overdue invoice balance"
+- "How are we doing on payments vs guest satisfaction?" -> true, 0.6,
+  ["On payments: collected revenue, outstanding arrears, or refunds?",
+   "For satisfaction: sentiment, ratings, or complaint topics?"], ""
+"""
 
 SYNTH_SYSTEM = """You answer real-estate questions using ONLY the supplied evidence,
 writing like a careful analyst. Cite the source of each claim (a table name or URL).
 
 Structure the ANSWER as a tight analyst note:
-- First line: the headline finding with the key figure.
+- If the question text contains an "Interpreted as:" line, open the note with
+  "ASSUMPTION: <that interpretation>" so the user can correct the reading.
+- First line after that: the headline finding with the key figure.
 - If the evidence includes cohort review statistics, follow with one "Vibe:" line
   summarising the qualitative pattern, then 2-4 compact stat bullets using the
   supplied numbers. Phrase cohort rates relative to the portfolio average where
