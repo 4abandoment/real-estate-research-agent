@@ -70,6 +70,13 @@ def main() -> None:
     if not settings.database_url or not settings.anthropic_api_key:
         raise SystemExit("DATABASE_URL and ANTHROPIC_API_KEY are required.")
 
+    from research_agent.llm.model_router import model_for
+
+    print(
+        "models in use: "
+        f"scope={model_for('scope')} sql={model_for('sql')} synth={model_for('synthesize')}"
+    )
+
     conn = connect(settings.database_url)
     apply_schema(conn)
     agent = ResearchAgent(
