@@ -31,6 +31,7 @@ PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "opencode/glm-5.3-flash": (0.15, 0.50),
     "opencode/glm-5.3": (1.40, 4.40),
     "opencode/minimax-m3": (0.30, 1.20),
+    "openrouter/z-ai/glm-5.3-flash": (0.15, 0.50),
 }
 
 T = TypeVar("T")
