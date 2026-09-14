@@ -3,11 +3,28 @@ from research_agent.agent.parsing import parse_decision, parse_scope
 
 def test_parse_scope_detects_clarification() -> None:
     result = parse_scope('{"needs_clarification": true, "questions": ["Which area?"]}')
-    assert result == {"needs_clarification": True, "questions": ["Which area?"]}
+    assert result["needs_clarification"] is True
+    assert result["questions"] == ["Which area?"]
+    assert result["confidence"] == 1.0
+    assert result["assumption"] == ""
 
 
 def test_parse_scope_defaults_on_garbage() -> None:
-    assert parse_scope("no json here") == {"needs_clarification": False, "questions": []}
+    result = parse_scope("no json here")
+    assert result["needs_clarification"] is False
+    assert result["questions"] == []
+    assert result["confidence"] == 1.0
+    assert result["assumption"] == ""
+
+
+def test_parse_scope_reads_confidence_and_assumption() -> None:
+    result = parse_scope(
+        '{"needs_clarification": false, "confidence": 0.9, "questions": [],'
+        ' "assumption": "assumed top 10% by nightly price"}'
+    )
+    assert result["needs_clarification"] is False
+    assert result["confidence"] == 0.9
+    assert result["assumption"] == "assumed top 10% by nightly price"
 
 
 def test_parse_scope_ignores_empty_questions() -> None:

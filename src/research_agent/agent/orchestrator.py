@@ -108,15 +108,22 @@ class ResearchAgent:
             # Reviewer direction is authoritative: act on it, never re-clarify
             # (a "decline this request" must produce a decline, not a question).
             report("Following reviewer guidance")
-            scope = {"needs_clarification": False, "questions": []}
+            scope = {"needs_clarification": False, "questions": [], "assumption": ""}
         else:
             report("Scoping your question")
-            scope = self._scope(
-                safe_question,
-                history_text,
-                # Once a reviewer has directed the agent, stop clarifying: act on it.
-                clarified=len(history) >= 8 or any(m.role == "system" for m in history),
+            clarify_turns = sum(
+                1
+                for message in history
+                if message.role == "assistant" and message.content.startswith("Before I dig in")
             )
+            # Two clarify turns maximum; once spent, answer with stated
+            # assumptions. Reviewer directives also stop clarifying.
+            clarified = (
+                clarify_turns >= 2
+                or len(history) >= 8
+                or any(message.role == "system" for message in history)
+            )
+            scope = self._scope(safe_question, history_text, clarified=clarified)
         if scope["needs_clarification"]:
             answer = "Before I dig in:\n" + "\n".join(f"- {item}" for item in scope["questions"])
             record_query(
@@ -128,6 +135,11 @@ class ResearchAgent:
             )
             return AgentResult(answer=answer, sources=["clarify"])
 
+        assumption = (scope.get("assumption") or "").strip()
+        resolved_question = safe_question
+        if assumption:
+            resolved_question = f"{safe_question}\n\nInterpreted as: {assumption}"
+
         report("Prioritising sources")
         prior_turns = [redact(message.content) for message in history if message.role == "user"]
         if prior_turns and prior_turns[-1].strip() == safe_question.strip():
@@ -137,10 +149,10 @@ class ResearchAgent:
         routing_input = "\n".join([*prior_turns[-3:], safe_question])
         matches = route_question(self._conn, self._embedder, routing_input, top_k=3)
         source_ids = [match["id"] for match in matches]
-        evidence, sql = self._retrieve(safe_question, matches, history_text, report)
+        evidence, sql = self._retrieve(resolved_question, matches, history_text, report)
 
         report("Writing the answer")
-        decision = self._synthesise(safe_question, evidence, directive=safe_directive)
+        decision = self._synthesise(resolved_question, evidence, directive=safe_directive)
         record_query(
             self._conn,
             channel_id=channel_id,

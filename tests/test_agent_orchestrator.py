@@ -208,6 +208,36 @@ def test_routing_includes_earlier_user_turns(monkeypatch) -> None:
     assert captured[0].count("total overdue balance") == 1
 
 
+def test_scope_assumption_flows_to_sql_and_synthesis(monkeypatch) -> None:
+    import research_agent.agent.orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator,
+        "route_question",
+        lambda conn, embedder, question, top_k=3: [],
+    )
+
+    client = _ScriptedClient(
+        [
+            LLMResponse(
+                '{"needs_clarification": false, "confidence": 0.95, "questions": [],'
+                ' "assumption": "assumed trouble means highest overdue balance"}',
+                "m",
+                1,
+                2,
+                1.0,
+            ),
+            LLMResponse(SYNTH_OK, "m", 1, 2, 1.0),
+        ]
+    )
+    agent = _agent(client)
+
+    agent.handle(question="Which of our listings are in trouble?", channel_id="C", thread_ts="T")
+
+    synth_content = client.calls[-1]["messages"][0]["content"]
+    assert "Interpreted as: assumed trouble means highest overdue balance" in synth_content
+
+
 def test_review_sampling_uses_full_cohort_sql(monkeypatch) -> None:
     import research_agent.agent.orchestrator as orchestrator
 
