@@ -11,7 +11,10 @@ the solution, build, deploy, iterate.
 
 ## Status
 
-Early scaffold. See `AGENTS.md` for structure and conventions.
+**In testing** — feature-complete demo under active evaluation (LLM routing,
+review enrichment and scoping behaviour are being validated against the eval
+gate before the release candidate). Not yet deployed. See `AGENTS.md` for
+structure and conventions.
 
 ## Data
 
